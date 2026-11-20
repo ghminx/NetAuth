@@ -17,6 +17,7 @@ public partial class LoginWindow : Window
             Scenario.AlreadyAuthenticated => "이미 인증됨",
             Scenario.Rejected => "자격 증명 거부",
             Scenario.Delayed => "응답 지연",
+            Scenario.NoResponse => "응답 없음",
             Scenario.ConnectionError => "연결 오류",
             Scenario.AdditionalVerification => "추가 인증",
             Scenario.MissingControl => "필수 컨트롤 누락",
@@ -44,9 +45,13 @@ public partial class LoginWindow : Window
         SubmissionCount.Text = $"제출 횟수 {++submissions}회";
         Credentials.IsEnabled = false;
 
-        if (scenario == Scenario.Delayed)
+        if (scenario is Scenario.Delayed or Scenario.NoResponse)
         {
             StatusText.Text = "인증 결과를 기다리는 중입니다.";
+            if (scenario == Scenario.NoResponse)
+            {
+                return;
+            }
             await Task.Delay(TimeSpan.FromSeconds(3));
         }
 

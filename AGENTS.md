@@ -2,7 +2,7 @@
 
 ## 프로젝트 구조
 
-- `NetAuth.slnx`는 Windows용 C# 솔루션임. `src/NetAuth/Program.cs`는 콘솔 진입점이며, 현재는 Microsoft UI Automation 어셈블리를 로드하고 이름을 출력함.
+- `NetAuth.slnx`는 Windows용 C# 솔루션임. `src/NetAuth/Program.cs`는 CLI와 WPF 계정 설정 화면의 진입점임. 화면은 `UI/`, 사용자별 자격 증명 저장은 `Security/`에서 관리함.
 - 기능 범위와 단계별 완료 조건은 [개발 기획서](docs/DEVELOPMENT_PLAN.md)에서 확인함. PClient 탐지 코드는 구현 시 `src/NetAuth/PClient/`에 두고, 자격 증명 저장은 `Security/`로 분리함.
 - `tests/`에는 개발자가 로컬에서 실행할 검증 스크립트를 둠.
 
@@ -18,12 +18,12 @@ dotnet run --project src/NetAuth --no-build
 & ./tests/Startup.Tests.ps1
 ```
 
-빌드 명령은 복원과 Debug 컴파일을 수행함. 실행 명령은 방금 빌드한 콘솔 앱을 시작함. 배포 파일은 `dotnet publish src/NetAuth -c Release -o artifacts/publish`로 생성함.
+빌드 명령은 복원과 Debug 컴파일을 수행함. 실행 명령은 계정 설정 창을 시작함. 인수 `-- --settings-dummy`를 추가하면 가상 계정용 설정 창을 시작함. 배포 파일은 `dotnet publish src/NetAuth -c Release -o artifacts/publish`로 생성함.
 
 ## 코드 스타일과 검증
 
 - C# 들여쓰기는 `.editorconfig`에 따라 공백 4칸을 사용함. 타입과 메서드는 `PascalCase`, 매개변수와 지역 변수는 `camelCase`로 작성함. 서식은 `dotnet format NetAuth.slnx --verify-no-changes`로 확인함.
-- 시작 테스트는 Debug 빌드 후 앱의 종료 코드와 UI Automation 어셈블리 이름을 확인함. PowerShell 테스트 파일은 `Startup.Tests.ps1`처럼 검증 대상 이름 뒤에 `.Tests.ps1`을 붙임.
+- 시작 테스트는 Debug 빌드 후 `--check-ui-automation`의 종료 코드와 UI Automation 어셈블리 이름을 확인함. PowerShell 테스트 파일은 `Startup.Tests.ps1`처럼 검증 대상 이름 뒤에 `.Tests.ps1`을 붙임.
 - PClient 연동을 변경할 때는 기획서 7장의 관련 시나리오 번호, 사용한 PClient 버전, 관찰 결과를 기록함. 창이 사라진 경우에도 인증 성공을 판정하려면 별도의 상태 신호를 확인해야 함.
 
 ## 보안과 기여 절차

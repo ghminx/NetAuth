@@ -30,6 +30,7 @@ internal enum Scenario
     AlreadyAuthenticated,
     Rejected,
     Delayed,
+    NoResponse,
     ConnectionError,
     AdditionalVerification,
     MissingControl

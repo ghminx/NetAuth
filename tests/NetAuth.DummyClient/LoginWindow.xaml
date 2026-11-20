@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="NetAuth 테스트용" AutomationProperties.AutomationId="NetAuthDummyLogin"
         Width="412" SizeToContent="Height" ResizeMode="CanMinimize"
-        WindowStartupLocation="CenterScreen" Background="White"
+        WindowStartupLocation="CenterScreen" ShowActivated="False" Background="White"
         UseLayoutRounding="True" FontFamily="Malgun Gothic" FontSize="14" Foreground="#293B4E">
     <Window.Resources>
         <SolidColorBrush x:Key="Heading" Color="#18477B" />
