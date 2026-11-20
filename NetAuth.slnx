@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/NetAuth/NetAuth.csproj" />
+  <Project Path="tests/NetAuth.DummyClient/NetAuth.DummyClient.csproj" />
+</Solution>

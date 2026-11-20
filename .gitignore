@@ -1,0 +1,8 @@
+.dotnet/
+.dotnet-home/
+NetAuth-sdk.zip
+bin/
+obj/
+.vs/
+*.user
+artifacts/
