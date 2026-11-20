@@ -93,6 +93,25 @@ foreach ($scenario in $scenarios.Keys) {
 
         if ($scenario -eq 'Success') {
             $id.GetCurrentPattern($valuePattern).SetValue('old-demo-id')
+            $password.GetCurrentPattern($valuePattern).SetValue('secret-sentinel-98')
+            $json = & $inspectPClient -ProcessId $process.Id -AsJson
+            $report = $json | ConvertFrom-Json
+            $reportedId = $report.ControlCandidates | Where-Object AutomationId -eq 'UserId'
+            $reportedPassword = $report.ControlCandidates | Where-Object AutomationId -eq 'Password'
+            $reportedButton = $report.ControlCandidates | Where-Object AutomationId -eq 'SignIn'
+            Assert-Equal $report.State 'LoginRequired' 'Diagnostic JSON state'
+            Assert-Equal $reportedId.Role 'InputCandidate' 'ID candidate'
+            Assert-Equal $reportedId.SupportsValuePattern $true 'ID value pattern'
+            Assert-Equal $reportedId.ValueIsReadOnly $false 'ID editability'
+            Assert-Equal $reportedPassword.Role 'PasswordCandidate' 'Password candidate'
+            Assert-Equal $reportedPassword.IsPassword $true 'Password metadata'
+            Assert-Equal $reportedPassword.SupportsValuePattern $true 'Password value pattern'
+            Assert-Equal $reportedButton.Role 'LoginButtonCandidate' 'Login button candidate'
+            Assert-Equal $reportedButton.SupportsInvokePattern $true 'Login button invoke pattern'
+            Assert-Equal $reportedButton.WindowIndex $report.StatusWindowIndex 'Login button window'
+            Assert-Equal ($json -match 'old-demo-id|secret-sentinel-98') $false 'No credential values in diagnostic'
+            Assert-Equal $id.GetCurrentPattern($valuePattern).Current.Value 'old-demo-id' 'Read-only diagnostic'
+            Assert-Equal ([regex]::Match($count.Current.Name, '[0-9]+').Value) '0' 'No diagnostic submission'
             $rememberId.GetCurrentPattern($togglePattern).Toggle()
             $autoLogin.GetCurrentPattern($togglePattern).Toggle()
             Assert-Equal (Read-LoginResult) 'Authenticated' 'Dummy login result'

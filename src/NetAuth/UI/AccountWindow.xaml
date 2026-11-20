@@ -154,6 +154,9 @@
                         </Grid>
                         <Border Height="1" Background="{StaticResource Line}" Margin="0,13,0,10" />
                         <WrapPanel>
+                            <Button x:Name="FillPClientIdButton" Content="PClient ID 채우기" Style="{StaticResource PrimaryAction}"
+                                    Click="FillPClientId_Click" Margin="0,0,8,4"
+                                    AutomationProperties.AutomationId="FillPClientId" />
                             <Button Content="계정 변경" Style="{StaticResource SecondaryAction}" Click="Edit_Click"
                                     Margin="0,0,8,4" AutomationProperties.AutomationId="EditAccount" />
                             <Button x:Name="DummyLogin" Content="인증 확인" Style="{StaticResource Action}"

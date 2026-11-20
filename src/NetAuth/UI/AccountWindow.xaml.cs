@@ -23,6 +23,7 @@ public partial class AccountWindow : Window
         store = new CredentialStore(useDummyAccount);
 
         DummyLogin.Visibility = useDummyAccount ? Visibility.Visible : Visibility.Collapsed;
+        FillPClientIdButton.Visibility = useDummyAccount ? Visibility.Collapsed : Visibility.Visible;
 
         try
         {
@@ -201,6 +202,45 @@ public partial class AccountWindow : Window
         {
             VerificationState.Text = "미확인";
             ShowFeedback("로그인 확인 중 오류가 발생했습니다. 계정 설정과 대상 창을 확인하세요.", isError: true);
+        }
+        finally
+        {
+            SavedActions.IsEnabled = true;
+        }
+    }
+
+    private async void FillPClientId_Click(object sender, RoutedEventArgs e)
+    {
+        DeleteConfirmation.Visibility = Visibility.Collapsed;
+        SavedActions.IsEnabled = false;
+        ShowFeedback("PClient의 로그아웃 상태를 확인하는 중입니다.");
+        try
+        {
+            var userId = store.Load()?.UserId;
+            if (userId is null)
+            {
+                ShowOverview(null);
+                ShowFeedback("저장된 계정이 없습니다.", isError: true);
+                return;
+            }
+
+            var result = await Task.Run(() => PClientIdFill.Fill(userId));
+            ShowFeedback(result switch
+            {
+                PClientIdFillResult.Filled => "PClient ID를 채웠습니다.",
+                PClientIdFillResult.WindowNotFound => "이 Windows 세션에서 PClient 로그인 창을 열어 주세요.",
+                PClientIdFillResult.AmbiguousWindow => "PClient 창을 하나만 남기고 다시 시도하세요.",
+                PClientIdFillResult.LogoutNotConfirmed => "PClient에서 로그아웃 상태를 확인할 수 없습니다.",
+                PClientIdFillResult.FieldsNotConfirmed => "PClient 로그인 입력란을 확인할 수 없습니다.",
+                PClientIdFillResult.PasswordNotEmpty => "PClient의 비밀번호란을 비운 뒤 다시 시도하세요.",
+                PClientIdFillResult.RestorationNotVerified => "ID 복구를 확인할 수 없습니다. PClient에 표시된 ID를 확인하세요.",
+                PClientIdFillResult.Busy => "다른 NetAuth 창에서 ID를 채우는 중입니다.",
+                _ => "PClient에서 저장된 ID가 입력됐는지 확인할 수 없습니다."
+            }, isError: result != PClientIdFillResult.Filled);
+        }
+        catch (Exception error) when (IsStorageError(error) || error is InvalidOperationException or COMException)
+        {
+            ShowFeedback("PClient에 ID를 채울 수 없습니다. 저장된 계정과 PClient 창을 확인하세요.", isError: true);
         }
         finally
         {

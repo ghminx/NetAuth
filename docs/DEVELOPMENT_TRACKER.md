@@ -92,24 +92,86 @@ dotnet run --project src/NetAuth --no-build -- --settings-dummy
 
 ### 실제 연동 전 확보할 UI 신호
 
-- [ ] 실제 설치 버전과 Windows 대화형 세션에서 실행되는 `PClientUI`를 확인함. 설치 PC에서 PID 없이 읽기 전용 진단을 실행하여 기존 로그아웃 신호가 재현되는지 확인함.
-- [ ] 로그인 창의 ID 입력란·비밀번호 입력란·로그인 버튼의 `AutomationId`, `ControlType`, `IsPassword`, `ValuePattern`·`InvokePattern` 지원 여부를 기록함. 입력란 값은 수집하지 않음.
+- [x] 설치 PC의 Windows 대화형 세션에서 PID 없이 `PClientUI`를 찾고 로그아웃 신호를 재현함.
+- [x] 로그인 창의 접근성 속성과 창 기준 좌표를 수집함. 첨부 화면의 상하 배치와 대조해 ID 입력란 후보는 `1024`(Y=363), 비밀번호 입력란 후보는 `1022`(Y=425), 로그인 버튼 후보는 `1029`(Y=485, 로그인 문구 일치)로 식별함.
+- [x] 실제 `1024`와 `1022`가 네이티브 `Edit`이며 읽기 전용이 아님을 확인함. `1024`는 일반 입력란, `1022`는 마스킹 입력란으로 확인됨. 두 필드 모두 수동으로 한 글자를 입력·삭제할 때 길이 변화와 원래 길이 복구가 감지됨.
+- [x] 실제 `1024`·`1022`에서 Win32 방식으로 한 글자 자동 입력·제거에 성공함. 두 필드가 빈 상태에서 가상 숫자 8자리를 각각 순서대로 입력·제거했으며, 원래 글자 수와 선택 범위 복구를 확인함.
+- [x] 실제 ID 입력란 `1024`에서 시작 값이 비어 있거나 다른 ID인 경우 모두 입력값 전체를 등록 ID로 교체하고, 원래 ID와 선택 범위를 복구함.
+- [x] NetAuth의 계정 관리에 **PClient ID 채우기**를 연결함. 동일 Windows 세션의 PClient 로그아웃 창과 빈 비밀번호란을 확인하면 저장된 ID로 입력란 전체를 교체함. 실제 PClient에서 배포본 버튼을 통한 교체는 확인 대기 중임.
+- [ ] 실제 설치 버전을 기록하고 로그인 버튼 제출 동작을 검증함. 관찰한 후보 3개는 UI Automation에서 `Pane`으로 노출됨. 입력란은 `ValuePattern`을, 버튼은 `InvokePattern`을 제공하지 않음.
 - [ ] 허용된 계정으로 직접 로그인한 뒤 인증 완료를 나타내는 상태 문구, 트레이 메뉴 또는 공식 상태 신호를 찾아 기록함. 창이 닫히기만 하면 결과를 `UnknownState`로 처리함.
 - [ ] 관찰 가능한 오류와 추가 인증 상태를 확인함. 승인된 검증 범위에서 일반 사용자 권한, PClient 설치 버전 차이, 잠금·원격 세션에서의 UI 접근 여부를 확인함.
 
-### 로그아웃 상태 먼저 조사
+### 로그아웃 상태와 입력 컨트롤 조사
 
 1. `tools/Inspect-PClient.ps1`을 PClient 설치 PC로 복사하고, PClient 로그인 창을 화면에 표시함.
 2. PClient 창과 같은 Windows 데스크톱 세션에서 Windows PowerShell을 열고, 파일이 있는 폴더에서 아래 명령을 실행함. 현재 세션의 `PClientUI` 프로세스에서 PID를 자동으로 얻음.
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -AsJson
 ```
 
 - `LoginRequired` 및 `VisibleLogoutText`는 대상 창에서 로그아웃 문구가 읽혔음을 의미함. `ProcessName`, `StatusName`, `AutomationId`, `ControlType`을 기록함.
+- `ControlCandidates`에서 `StatusWindowIndex`와 같은 `WindowIndex`를 우선 확인함. `InputCandidate`는 ID 입력란 후보, `PasswordCandidate`는 비밀번호 입력란 후보, `LoginButtonCandidate`는 로그인 버튼 후보임. `ButtonCandidate`, `LoginLabelCandidate`, `CustomCandidate`는 별도 확인이 필요한 요소임.
+- 각 후보는 `AutomationId`, `ControlType`, `ClassName`, 입력란 마스킹 여부, 조작 가능 상태, 지원 패턴과 창 기준 좌표를 제공함. `ScanInterrupted`가 참이면 창이 조사 중 바뀐 경우로, 로그아웃 화면을 다시 표시한 후 재실행함.
 - `UnknownState` 및 `LogoutTextNotExposed`는 예상 문구를 가진 화면 요소가 확인되지 않았음을 의미함. 이 경우 Live Inspect로 문구가 노출되는 위치나 실제 속성을 조사함.
 - `PClientUiNotInSession`이면 PClient 창을 연 데스크톱에서 다시 실행함. `MultiplePClientUiProcesses` 또는 프로세스명 변경으로 자동 선택을 할 수 없으면 작업 관리자에서 창의 PID를 찾아 `-ProcessId <PID>`로 지정함. `WindowNotFound`이면 창을 표시한 후 다시 실행함.
-- 진단은 상태 문구만 검사하며 로그인이나 입력을 수행하지 않음. 가입 계정이나 자격 증명 입력 없이 실행할 수 있음.
+- 진단은 상태 문구와 컨트롤 속성을 읽기 전용으로 조사함. 입력란 값과 일반 접근성 이름은 출력하지 않으며, 로그아웃 상태에서 계정 입력 없이 실행할 수 있음.
+
+### 입력란 역할과 입력 동작 확인
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -CheckInput -AsJson
+```
+
+- PClient 로그아웃 창과 PowerShell 창을 나란히 표시함. 비밀번호란은 빈 상태에서 시작함.
+- 스크립트가 순서대로 안내하면 오른쪽 방향키로 커서를 해당 입력란 끝까지 옮긴 뒤 숫자 `0`을 한 글자 추가함. 감지 안내 후 `Backspace`로 추가한 글자를 지움. ID 입력란이 가득 찬 경우 원래 글자를 알고 있을 때만 마지막 한 글자를 지운 뒤 안내에 따라 복원함. `Enter`와 로그인 버튼은 사용하지 않음.
+- `InputCheck.Fields`에서 `IsNativeEdit`, `IsMasked`, `IsReadOnly`, `InputObserved`, `OriginalLengthRestored`를 확인함. 스크립트는 입력이나 버튼 클릭을 직접 수행하지 않고 입력 전후의 길이만 내부에서 비교함. 필드값과 길이는 출력하지 않음.
+
+### 로그인 제출 없는 자동 입력 진단
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -CheckAutoInput -AsJson
+```
+
+- 로그인 창에서 자동 로그인 체크가 해제됐는지 확인하고 비밀번호란을 비운 상태에서 실행함. 실행 중에는 창을 조작하지 않음.
+- 로그아웃 요소 `1013`과 대상 프로세스에 속한 네이티브 입력란을 확인함. `1024`와 `1022`에 순서대로 숫자 `0`을 한 글자 추가하고 해당 문자만 제거함. 입력값은 읽지 않으며 로그인 버튼이나 키 입력을 호출하지 않음.
+- `InputObserved`, `OriginalLengthRestored`, `OriginalSelectionRestored`가 모두 참이면 삽입과 원래 길이·선택 범위 복구가 확인됨. `InputLimitReached`이면 기존 입력을 보존하고 해당 필드 검사를 건너뜀.
+- `RestorationNotVerified`이면 다음 필드로 진행하지 않거나 스크립트를 종료함. 해당 필드에 테스트 문자가 남았는지 화면에서 확인함.
+
+### 전체 입력 미리보기
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -PreviewInput -AsJson
+```
+
+- 자동 로그인 체크가 해제된 로그아웃 화면에서 ID와 비밀번호를 모두 비운 뒤 실행함. 실행 중에는 PClient 창을 조작하지 않음.
+- ID의 가상 숫자 8자리를 5초간 표시한 후 지움. 이어 비밀번호란에서 가상 숫자 8자리를 5초간 표시한 후 지움. 로그인 버튼과 Enter는 사용하지 않음.
+- `InputCheck.Fields`에서 두 입력란의 `InputObservedAndRestored`를 확인함. 기존 입력이 남아 있으면 미리보기를 시작하지 않음.
+
+### 등록 ID 전체 교체 확인
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -CheckIdReplacement -AsJson
+```
+
+- PClient 로그아웃 창에서 자동 로그인 체크를 해제하고 비밀번호란을 비움. ID는 현재 상태 그대로 둠.
+- PowerShell이 입력을 요청하면 NetAuth에 등록한 ID를 입력함. 진단은 빈 칸과 다른 가상 ID가 입력된 칸을 각각 준비하고, 두 경우 모두 입력란 전체가 등록 ID와 정확히 일치하는지 확인함.
+- 진단 결과는 `InputCheck`의 `EmptyIdMatched`, `PrefilledIdMatched`, `OriginalIdRestored`, `OriginalSelectionRestored`로 확인함. 원래 ID와 등록 ID는 출력하지 않으며, 비밀번호 입력과 로그인 제출을 수행하지 않음.
+- `BothCasesMatchedAndRestored`이면 두 케이스와 복구에 성공함. `RestorationNotVerified`이면 입력란의 값을 화면에서 확인함.
+
+### NetAuth의 PClient ID 채우기
+
+- PClient 로그아웃 창을 띄우고 비밀번호란을 비움. NetAuth에 계정을 등록한 후 **계정 관리 → PClient ID 채우기**를 선택함.
+- NetAuth가 로그아웃 상태 `1013`과 ID 입력란 `1024`를 확인하면 입력란 전체를 저장된 ID로 교체함. 성공 시 계정 관리 화면에 결과를 표시하고, 입력한 ID는 PClient에 남겨둠. 비밀번호 입력과 로그인 제출은 수행하지 않음.
+- `tests/PClientIdFill.Tests.ps1`은 PClient와 운영용 저장 계정이 없는 개발 환경에서 실행함. 네이티브 검증용 창을 열고 저장된 가상 계정을 사용함.
+
+### 설치 PC에 실행 파일 복사
+
+- `artifacts/NetAuth-win-x64.zip`을 Windows x64 설치 PC에서 모두 압축 해제함. 생성된 `publish-win-x64` 폴더에서 `NetAuth.exe`를 실행함.
+- `publish-win-x64`는 .NET Desktop Runtime을 포함하는 배포 폴더임. 빌드는 `dotnet publish src/NetAuth -c Release -r win-x64 --self-contained true -o artifacts/publish-win-x64`로 수행함.
+- 기존 `artifacts/publish` 배포 폴더는 설치 PC의 .NET 10 Desktop Runtime을 사용함.
+- 설치 PC에서 `0x800711C7`로 `NetAuth.dll`이 차단됨. 이벤트 3077의 정책 ID `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`는 Windows 11 Smart App Control의 `VerifiedAndReputableDesktop` 기본 정책임. 현재 EXE와 DLL은 서명되지 않았으며, 해당 정책을 유지한 배포에는 신뢰된 코드 서명으로 바이너리를 서명하고 설치 PC에서 재검증해야 함. [Microsoft 기본 정책 목록](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/windows-defender-application-control/operations/inbox-wdac-policies), [Microsoft 코드 서명 안내](https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/code-signing-for-smart-app-control)
 
 ## 검증 기록
 
@@ -123,3 +185,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1
 | 2026-11-21 | 개발 PC | 더미 로그인 통합 검증 | `--login-dummy` 추가 전 성공 경로 테스트 실패, 중복 실행 차단 추가 전 동시 실행 테스트 실패 확인. 최종 Debug 빌드 경고·오류 0건, 시작 테스트와 서식 검사 통과, 더미 통합 시나리오 9개 연속 2회 통과 |
 | 2026-11-21 | 개발 PC | 계정 설정 UI 및 암호화 저장 | Windows에서 기본 첫 실행 화면 확인. 더미 설정 창으로 필수 입력, 취소, 마스킹, 암호화 파일, 저장·재실행, 계정 변경, 삭제 확인·취소, 저장 계정으로 제출 1회 및 인증 완료 검증. Debug 빌드 경고·오류 0건, 시작·서식 검사 및 기존 더미 시나리오 9개 통과 |
 | 2026-11-21 | 개발 PC | 계정 UI 개편 및 NA 아이콘 | 가상 계정으로 등록 전후 화면과 인증 상태 구분 확인. 제목 표시줄의 드래그 영역과 최소화·최대화·복원·닫기 검증. Debug 빌드 경고·오류 0건, 서식·시작·계정 통합 테스트와 기존 더미 시나리오 9개 통과. Release 실행 파일의 NA 아이콘 추출 확인 |
+| 2026-11-21 | 개발 PC | PClient 컨트롤 통합 진단 | 더미를 `PClientUI.exe`로 실행해 PID 없이 로그아웃 상태와 입력란·비밀번호란·로그인 버튼 후보의 JSON 출력 확인. 입력값 비노출과 진단 후 제출 0회 확인. 기존 통합 시나리오 9개 통과 |
+| 2026-11-21 | PClient 설치 PC | 입력 컨트롤 관찰 | PID 없이 `PClientUI` 창 1개에서 `LoginRequired`, 상태 요소 `1013`, 조사 중단 없음 확인. 두 `Edit`의 Y 좌표와 화면 배치로 위쪽 ID `1024`, 아래쪽 비밀번호 `1022`로 추정함. `1029`가 로그인 버튼 후보로 출력됨 |
+| 2026-11-21 | 개발 PC | Win32 입력란 검증 | 네이티브 `Edit` 필드 두 개를 가진 검증용 창에서 위쪽 일반 입력란과 아래쪽 마스킹 입력란을 구분함. 두 필드 모두 한 글자 추가와 원래 길이 복구를 감지함. 실제 PClient의 입력 동작은 미검증임 |
+| 2026-11-21 | PClient 설치 PC | 실제 입력란 수동 검증 | `1024`의 `IsMasked=false`, `1022`의 `IsMasked=true` 확인. 두 항목의 `IsNativeEdit=true`, `IsReadOnly=false`, `InputObserved=true`, `OriginalLengthRestored=true` 확인. 로그인 버튼은 사용하지 않음 |
+| 2026-11-21 | 개발 PC | 자동 입력 후 복구 | Win32 검증용 창에서 두 필드에 한 글자를 자동으로 추가·제거하고 ID 원문·빈 비밀번호·선택 범위 복구 확인. ID 길이 상한 및 비밀번호가 채워진 경우 입력 제어 확인 |
+| 2026-11-21 | PClient 설치 PC | 실제 자동 입력 후 복구 | `1024`(ID)와 `1022`(비밀번호) 모두 `InputObservedAndRestored` 반환. 두 필드의 `InputObserved`, `OriginalLengthRestored`, `OriginalSelectionRestored`가 모두 참임. 로그인 제출은 수행하지 않음 |
+| 2026-11-21 | 개발 PC | 전체 입력 미리보기 | Win32 검증용 창에서 가상 8자리 입력이 한 필드씩 표시되고 두 필드 모두 다시 비워짐을 확인함 |
+| 2026-11-21 | PClient 설치 PC | 실제 전체 입력 미리보기 | `-PreviewInput` 실행에서 `1024`(ID)와 `1022`(비밀번호)가 모두 `InputObservedAndRestored`를 반환함. 원래 글자 수와 선택 범위 복구는 모두 참임. 로그인 제출은 수행하지 않음 |
+| 2026-11-21 | 개발 PC | ID 전체 교체와 원문 복구 | 네이티브 검증용 창에서 빈 칸과 가상 ID가 채워진 칸을 8자리 ID로 교체함. 시작 시 빈 ID 및 기존 ID의 원문·선택 범위가 복구됨을 각각 확인함 |
+| 2026-11-21 | PClient 설치 PC | 실제 ID 전체 교체 | `-CheckIdReplacement` 실행 결과 `BothCasesMatchedAndRestored` 확인. `EmptyIdMatched`, `PrefilledIdMatched`, `OriginalIdRestored`, `OriginalSelectionRestored`가 모두 참임. 비밀번호 입력과 로그인 제출을 수행하지 않음 |
+| 2026-11-21 | 개발 PC | NetAuth 본체 ID 채우기 | 실제 NetAuth UI와 Windows 보호 저장소를 사용해 빈 ID·다른 ID 입력을 검증함. 인증됨 상태와 비밀번호 입력 상태에서는 ID를 보존함. 검증용 창에서 네 케이스 모두 비밀번호 변경 알림과 로그인 버튼 호출이 발생하지 않음 |
+| 2026-11-21 | 개발 PC | 런타임 포함 Windows x64 배포 | 런타임 위치를 빈 폴더로 지정했을 때 기존 배포본의 실행 실패를 재현함. 같은 조건에서 런타임 포함 배포본의 CLI와 실제 계정 설정 창 실행을 확인함. 설치 PC에서의 실행은 확인 대기 중임 |
+| 2026-11-21 | PClient 설치 PC | Smart App Control 차단 | 런타임 포함 배포본의 `NetAuth.dll`이 `0x800711C7`로 차단됨. 이벤트 3077·3033과 정책 ID를 확인함. 개발 PC 배포본 EXE와 DLL은 `NotSigned`이며, 조사한 로컬 인증서 저장소에서 서명용 개인키를 찾지 못함 |
