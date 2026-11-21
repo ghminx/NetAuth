@@ -10,20 +10,35 @@ using NetAuth.Security;
 
 namespace NetAuth.UI;
 
+internal enum AccountWindowMode
+{
+    PClient,
+    Dummy,
+    PClientPreview
+}
+
 public partial class AccountWindow : Window
 {
     private readonly CredentialStore store;
-    private readonly bool useDummyAccount;
+    private readonly AccountWindowMode mode;
     private string? registeredId;
+    private bool refreshingAutomaticLogin;
 
-    internal AccountWindow(bool useDummyAccount)
+    internal AccountWindow(AccountWindowMode mode)
     {
         InitializeComponent();
-        this.useDummyAccount = useDummyAccount;
-        store = new CredentialStore(useDummyAccount);
+        this.mode = mode;
+        var usesTestAccount = mode != AccountWindowMode.PClient;
+        store = new CredentialStore(usesTestAccount);
 
-        DummyLogin.Visibility = useDummyAccount ? Visibility.Visible : Visibility.Collapsed;
-        FillPClientIdButton.Visibility = useDummyAccount ? Visibility.Collapsed : Visibility.Visible;
+        DummyLogin.Visibility = usesTestAccount ? Visibility.Visible : Visibility.Collapsed;
+        FillPClientAccountButton.Visibility = usesTestAccount ? Visibility.Collapsed : Visibility.Visible;
+        AutomaticLoginSetting.Visibility = mode == AccountWindowMode.Dummy ? Visibility.Collapsed : Visibility.Visible;
+        if (mode == AccountWindowMode.PClientPreview)
+        {
+            Title = "NetAuth · PClient 로그인 검증";
+            DummyLogin.Content = "로그인 검증";
+        }
 
         try
         {
@@ -58,14 +73,75 @@ public partial class AccountWindow : Window
         SavedAccountId.Text = userId ?? string.Empty;
         AccountId.Clear();
         AccountPassword.Clear();
+        RefreshAutomaticLogin();
     }
+
+    private void RefreshAutomaticLogin()
+    {
+        refreshingAutomaticLogin = true;
+        AutoLoginAtLogon.IsEnabled = false;
+        try
+        {
+            if (mode != AccountWindowMode.PClientPreview || registeredId is null)
+            {
+                AutoLoginAtLogon.IsChecked = false;
+                AutoLoginDescription.Text = "실제 PClient의 로그인 결과를 확인한 뒤 사용할 수 있습니다.";
+                return;
+            }
+
+            AutoLoginAtLogon.IsChecked = PClientPreviewStartup.IsEnabled();
+            AutoLoginAtLogon.IsEnabled = true;
+            AutoLoginDescription.Text = "Windows 로그인 시 테스트용 PClient를 찾아 로그인을 한 번 시도합니다.";
+        }
+        catch (Exception error) when (IsStartupError(error))
+        {
+            AutoLoginDescription.Text = "Windows 시작 작업 상태를 읽을 수 없습니다.";
+        }
+        finally
+        {
+            refreshingAutomaticLogin = false;
+        }
+    }
+
+    private void AutoLoginAtLogon_Changed(object sender, RoutedEventArgs e)
+    {
+        if (refreshingAutomaticLogin || mode != AccountWindowMode.PClientPreview || registeredId is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (AutoLoginAtLogon.IsChecked == true)
+            {
+                PClientPreviewStartup.Enable();
+                ShowFeedback("Windows 로그인 시 자동으로 실행되도록 등록했습니다.");
+            }
+            else
+            {
+                PClientPreviewStartup.Disable();
+                ShowFeedback("Windows 로그인 시 실행 등록을 해제했습니다.");
+            }
+        }
+        catch (Exception error) when (IsStartupError(error))
+        {
+            RefreshAutomaticLogin();
+            ShowFeedback("Windows 시작 작업을 변경할 수 없습니다. 작업 스케줄러 상태를 확인하세요.", isError: true);
+        }
+    }
+
+    private static bool IsStartupError(Exception error) =>
+        error is COMException or UnauthorizedAccessException or InvalidOperationException;
 
     private void ShowEditor()
     {
         Heading.Text = registeredId is null ? "계정 등록" : "계정 변경";
-        Description.Text = useDummyAccount
-            ? "사용할 ID와 비밀번호를 입력하세요."
-            : "창원대 PClient에 사용하는 ID와 비밀번호를 입력하세요.";
+        Description.Text = mode switch
+        {
+            AccountWindowMode.PClient => "창원대 PClient에 사용하는 ID와 비밀번호를 입력하세요.",
+            AccountWindowMode.PClientPreview => "검증 창에서 사용할 가상 ID와 비밀번호를 입력하세요.",
+            _ => "사용할 ID와 비밀번호를 입력하세요."
+        };
         Editor.Visibility = Visibility.Visible;
         RegisterButton.Visibility = Visibility.Collapsed;
         SavedActions.Visibility = Visibility.Collapsed;
@@ -149,6 +225,21 @@ public partial class AccountWindow : Window
 
     private void ConfirmDelete_Click(object sender, RoutedEventArgs e)
     {
+        if (mode == AccountWindowMode.PClientPreview)
+        {
+            try
+            {
+                PClientPreviewStartup.Disable();
+                RefreshAutomaticLogin();
+            }
+            catch (Exception error) when (IsStartupError(error))
+            {
+                RefreshAutomaticLogin();
+                ShowFeedback("계정을 삭제하려면 Windows 시작 작업을 먼저 해제해야 합니다.", isError: true);
+                return;
+            }
+        }
+
         try
         {
             store.Delete();
@@ -180,23 +271,30 @@ public partial class AccountWindow : Window
                 return;
             }
 
-            var state = await Task.Run(() => DummyClientProbe.Login(account.UserId, account.Password));
+            var state = await Task.Run(() => mode == AccountWindowMode.PClientPreview
+                ? PClientAccountFill.LoginPreview(account).ToString()
+                : DummyClientProbe.Login(account.UserId, account.Password));
             VerificationState.Text = state switch
             {
-                "Authenticated" => "인증 확인됨",
+                "Authenticated" or "AlreadyAuthenticated" => "인증 확인됨",
                 "CredentialsRejected" => "계정 거부됨",
                 _ => "미확인"
             };
             ShowFeedback(state switch
             {
                 "Authenticated" => "인증 상태를 확인했습니다.",
+                "AlreadyAuthenticated" => "대상 창이 이미 인증된 상태입니다.",
                 "CredentialsRejected" => "계정이 거부되었습니다. ID와 비밀번호를 확인하세요.",
-                "WaitingForPClient" or "WaitingForWindow" => "대상 로그인 창을 먼저 열어 주세요.",
-                "MultipleDummyClients" => "대상 창을 하나만 남기고 다시 시도하세요.",
+                "WaitingForPClient" or "WaitingForWindow" or "WindowNotFound" => "대상 로그인 창을 먼저 열어 주세요.",
+                "MultipleDummyClients" or "AmbiguousWindow" => "대상 창을 하나만 남기고 다시 시도하세요.",
+                "LoginInProgress" or "Busy" => "다른 NetAuth 창에서 로그인 결과를 확인하는 중입니다.",
+                "LogoutNotConfirmed" => "대상 창에서 로그아웃 상태를 확인할 수 없습니다.",
+                "LoginButtonNotConfirmed" => "대상 창의 로그인 버튼을 확인할 수 없습니다.",
+                "PasswordNotEmpty" => "대상 창의 비밀번호란을 비운 뒤 다시 시도하세요.",
                 "ConnectionError" => "연결 오류가 발생했습니다.",
                 "ManualActionRequired" => "추가 인증이 필요합니다.",
                 _ => "로그인 결과를 확인할 수 없습니다."
-            }, isError: state != "Authenticated");
+            }, isError: state is not ("Authenticated" or "AlreadyAuthenticated"));
         }
         catch (Exception error) when (IsStorageError(error) || error is InvalidOperationException or COMException)
         {
@@ -209,38 +307,39 @@ public partial class AccountWindow : Window
         }
     }
 
-    private async void FillPClientId_Click(object sender, RoutedEventArgs e)
+    private async void FillPClientAccount_Click(object sender, RoutedEventArgs e)
     {
         DeleteConfirmation.Visibility = Visibility.Collapsed;
         SavedActions.IsEnabled = false;
         ShowFeedback("PClient의 로그아웃 상태를 확인하는 중입니다.");
         try
         {
-            var userId = store.Load()?.UserId;
-            if (userId is null)
+            var account = store.Load();
+            if (account is null)
             {
                 ShowOverview(null);
                 ShowFeedback("저장된 계정이 없습니다.", isError: true);
                 return;
             }
 
-            var result = await Task.Run(() => PClientIdFill.Fill(userId));
+            var result = await Task.Run(() => PClientAccountFill.Fill(account));
             ShowFeedback(result switch
             {
-                PClientIdFillResult.Filled => "PClient ID를 채웠습니다.",
-                PClientIdFillResult.WindowNotFound => "이 Windows 세션에서 PClient 로그인 창을 열어 주세요.",
-                PClientIdFillResult.AmbiguousWindow => "PClient 창을 하나만 남기고 다시 시도하세요.",
-                PClientIdFillResult.LogoutNotConfirmed => "PClient에서 로그아웃 상태를 확인할 수 없습니다.",
-                PClientIdFillResult.FieldsNotConfirmed => "PClient 로그인 입력란을 확인할 수 없습니다.",
-                PClientIdFillResult.PasswordNotEmpty => "PClient의 비밀번호란을 비운 뒤 다시 시도하세요.",
-                PClientIdFillResult.RestorationNotVerified => "ID 복구를 확인할 수 없습니다. PClient에 표시된 ID를 확인하세요.",
-                PClientIdFillResult.Busy => "다른 NetAuth 창에서 ID를 채우는 중입니다.",
+                PClientAccountFillResult.Filled => "PClient에 ID와 비밀번호를 채웠습니다.",
+                PClientAccountFillResult.WindowNotFound => "이 Windows 세션에서 PClient 로그인 창을 열어 주세요.",
+                PClientAccountFillResult.AmbiguousWindow => "PClient 창을 하나만 남기고 다시 시도하세요.",
+                PClientAccountFillResult.LogoutNotConfirmed => "PClient에서 로그아웃 상태를 확인할 수 없습니다.",
+                PClientAccountFillResult.FieldsNotConfirmed => "PClient 로그인 입력란을 확인할 수 없습니다.",
+                PClientAccountFillResult.PasswordNotEmpty => "PClient의 비밀번호란을 비운 뒤 다시 시도하세요.",
+                PClientAccountFillResult.PasswordNotAccepted => "PClient에서 비밀번호 입력을 확인할 수 없습니다.",
+                PClientAccountFillResult.RestorationNotVerified => "입력란 복구를 확인할 수 없습니다. PClient의 입력란을 확인하세요.",
+                PClientAccountFillResult.Busy => "다른 NetAuth 창에서 계정을 채우는 중입니다.",
                 _ => "PClient에서 저장된 ID가 입력됐는지 확인할 수 없습니다."
-            }, isError: result != PClientIdFillResult.Filled);
+            }, isError: result != PClientAccountFillResult.Filled);
         }
         catch (Exception error) when (IsStorageError(error) || error is InvalidOperationException or COMException)
         {
-            ShowFeedback("PClient에 ID를 채울 수 없습니다. 저장된 계정과 PClient 창을 확인하세요.", isError: true);
+            ShowFeedback("PClient에 계정을 채울 수 없습니다. 저장된 계정과 PClient 창을 확인하세요.", isError: true);
         }
         finally
         {

@@ -79,8 +79,8 @@
                                Foreground="{StaticResource Brand}" Margin="0,15,0,0" />
                     <TextBlock Foreground="{StaticResource Muted}" FontSize="13" LineHeight="21"
                                TextWrapping="Wrap" Margin="0,8,0,0">
-                        <Run Text="현재 Windows 사용자 전용" /><LineBreak />
-                        <Run Text="암호화 저장소를 사용합니다." />
+                        <Run Text="Windows 사용자별 저장" /><LineBreak />
+                        <Run Text="계정 정보 암호화" />
                     </TextBlock>
                 </StackPanel>
             </Border>
@@ -152,11 +152,22 @@
                             <TextBlock x:Name="VerificationState" Grid.Column="1" Text="확인 전" FontWeight="SemiBold"
                                        AutomationProperties.AutomationId="VerificationState" />
                         </Grid>
+                        <Border x:Name="AutomaticLoginSetting" Background="{StaticResource Rail}" CornerRadius="9"
+                                Margin="0,13,0,0" Padding="12,10" Visibility="Collapsed">
+                            <StackPanel>
+                                <CheckBox x:Name="AutoLoginAtLogon" Content="자동 로그인" FontWeight="SemiBold"
+                                          Foreground="{StaticResource Text}" VerticalContentAlignment="Center"
+                                          AutomationProperties.AutomationId="AutoLoginAtLogon"
+                                          Checked="AutoLoginAtLogon_Changed" Unchecked="AutoLoginAtLogon_Changed" />
+                                <TextBlock x:Name="AutoLoginDescription" TextWrapping="Wrap" Margin="19,4,0,0"
+                                           Foreground="{StaticResource Muted}" FontSize="13" />
+                            </StackPanel>
+                        </Border>
                         <Border Height="1" Background="{StaticResource Line}" Margin="0,13,0,10" />
                         <WrapPanel>
-                            <Button x:Name="FillPClientIdButton" Content="PClient ID 채우기" Style="{StaticResource PrimaryAction}"
-                                    Click="FillPClientId_Click" Margin="0,0,8,4"
-                                    AutomationProperties.AutomationId="FillPClientId" />
+                            <Button x:Name="FillPClientAccountButton" Content="PClient 계정 채우기" Style="{StaticResource PrimaryAction}"
+                                    Click="FillPClientAccount_Click" Margin="0,0,8,4"
+                                    AutomationProperties.AutomationId="FillPClientAccount" />
                             <Button Content="계정 변경" Style="{StaticResource SecondaryAction}" Click="Edit_Click"
                                     Margin="0,0,8,4" AutomationProperties.AutomationId="EditAccount" />
                             <Button x:Name="DummyLogin" Content="인증 확인" Style="{StaticResource Action}"

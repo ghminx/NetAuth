@@ -51,7 +51,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/DummyClient.Tests.
 - [x] **첫 실행 계정 설정** — 미등록 상태에서 ID와 마스킹된 비밀번호 입력란을 표시함. 저장, 재실행 시 복원, 변경, 삭제 확인, 입력 취소를 구현함. 더미 설정 화면에서 저장한 가상 계정으로 로그인 검증이 가능함.
 - [ ] **운영 로그** — 시간과 상태 전환, 오류 사유를 기록하고 자격 증명을 제외함.
 - [ ] **감시와 재시도** — 일시 장애에 대한 대기 간격과 시도 상한을 적용함. 결과 대기 중 중복 요청을 막고, 추가 인증·UI 불일치·계정 잠금 징후에서는 수동 조치 상태로 전환함.
-- [ ] **자동 시작과 배포** — Release 배포본을 준비하고 대화형 사용자 로그온을 기준으로 작업 스케줄러 등록·해제를 검증함.
+- [ ] **실환경 자동 시작과 배포** — 실제 PClient의 로그인·결과 판정을 확인한 뒤 대화형 사용자 로그온 작업에 연결하고 재부팅으로 검증함. 자동 실행 준비는 네이티브 검증 창에서 먼저 수행함.
 
 ## 3단계 · 개발 PC 통합 테스트
 
@@ -97,7 +97,11 @@ dotnet run --project src/NetAuth --no-build -- --settings-dummy
 - [x] 실제 `1024`와 `1022`가 네이티브 `Edit`이며 읽기 전용이 아님을 확인함. `1024`는 일반 입력란, `1022`는 마스킹 입력란으로 확인됨. 두 필드 모두 수동으로 한 글자를 입력·삭제할 때 길이 변화와 원래 길이 복구가 감지됨.
 - [x] 실제 `1024`·`1022`에서 Win32 방식으로 한 글자 자동 입력·제거에 성공함. 두 필드가 빈 상태에서 가상 숫자 8자리를 각각 순서대로 입력·제거했으며, 원래 글자 수와 선택 범위 복구를 확인함.
 - [x] 실제 ID 입력란 `1024`에서 시작 값이 비어 있거나 다른 ID인 경우 모두 입력값 전체를 등록 ID로 교체하고, 원래 ID와 선택 범위를 복구함.
-- [x] NetAuth의 계정 관리에 **PClient ID 채우기**를 연결함. 동일 Windows 세션의 PClient 로그아웃 창과 빈 비밀번호란을 확인하면 저장된 ID로 입력란 전체를 교체함. 실제 PClient에서 배포본 버튼을 통한 교체는 확인 대기 중임.
+- [x] ID 채우기 배포본으로 실제 PClient에 ID가 입력됨을 설치 PC 사용자가 확인함. PClient 버전은 미기록 상태임.
+- [x] NetAuth의 계정 관리에 **PClient 계정 채우기**를 연결함. 같은 Windows 세션의 로그아웃 창에서 저장된 ID와 비밀번호 입력을 수행함.
+- [x] 설치 PC 사용자가 배포본의 계정 채우기 버튼으로 실제 PClient 입력란이 채워짐을 보고함. 빈 ID·기존 ID 각각의 결과와 PClient 버전은 미기록 상태임.
+- [x] 실제 PClient의 숫자 컨트롤 ID를 재현한 네이티브 검증 창에서 저장된 가상 계정을 입력하고 로그인 버튼 1회 호출 및 명시적인 결과 판정을 검증함.
+- [x] 현재 Windows 사용자 전용 작업 스케줄러 로그온 작업을 등록하고 검증 창의 실행 지연, 중복 요청 및 재제출 없이 종료되는 조건을 확인함.
 - [ ] 실제 설치 버전을 기록하고 로그인 버튼 제출 동작을 검증함. 관찰한 후보 3개는 UI Automation에서 `Pane`으로 노출됨. 입력란은 `ValuePattern`을, 버튼은 `InvokePattern`을 제공하지 않음.
 - [ ] 허용된 계정으로 직접 로그인한 뒤 인증 완료를 나타내는 상태 문구, 트레이 메뉴 또는 공식 상태 신호를 찾아 기록함. 창이 닫히기만 하면 결과를 `UnknownState`로 처리함.
 - [ ] 관찰 가능한 오류와 추가 인증 상태를 확인함. 승인된 검증 범위에서 일반 사용자 권한, PClient 설치 버전 차이, 잠금·원격 세션에서의 UI 접근 여부를 확인함.
@@ -160,14 +164,39 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -C
 - 진단 결과는 `InputCheck`의 `EmptyIdMatched`, `PrefilledIdMatched`, `OriginalIdRestored`, `OriginalSelectionRestored`로 확인함. 원래 ID와 등록 ID는 출력하지 않으며, 비밀번호 입력과 로그인 제출을 수행하지 않음.
 - `BothCasesMatchedAndRestored`이면 두 케이스와 복구에 성공함. `RestorationNotVerified`이면 입력란의 값을 화면에서 확인함.
 
-### NetAuth의 PClient ID 채우기
+### NetAuth의 PClient 계정 채우기
 
-- PClient 로그아웃 창을 띄우고 비밀번호란을 비움. NetAuth에 계정을 등록한 후 **계정 관리 → PClient ID 채우기**를 선택함.
-- NetAuth가 로그아웃 상태 `1013`과 ID 입력란 `1024`를 확인하면 입력란 전체를 저장된 ID로 교체함. 성공 시 계정 관리 화면에 결과를 표시하고, 입력한 ID는 PClient에 남겨둠. 비밀번호 입력과 로그인 제출은 수행하지 않음.
-- `tests/PClientIdFill.Tests.ps1`은 PClient와 운영용 저장 계정이 없는 개발 환경에서 실행함. 네이티브 검증용 창을 열고 저장된 가상 계정을 사용함.
+- PClient 로그아웃 창에서 자동 로그인 체크를 해제하고 비밀번호란을 비움. NetAuth에 계정을 등록한 후 **계정 관리 → PClient 계정 채우기**를 선택함.
+- ID가 빈 경우와 다른 값이 들어 있는 경우 각각 등록한 ID와 비밀번호 마스킹 표시를 확인함. 테스트 사이에는 비밀번호란을 다시 비움. PClient의 로그아웃 표시가 유지되는지 확인함.
+- 앱은 로그아웃 상태 `1013`, ID 필드 `1024`, 마스킹된 비밀번호 필드 `1022`를 확인함. ID는 전체 일치로, 비밀번호는 원문을 읽지 않고 마스킹과 길이로 확인함. 로그인 버튼과 Enter 호출은 없음.
+- `tests/PClientAccountFill.Tests.ps1`은 PClient와 운영용 저장 계정이 없는 개발 환경에서 실행함. 별도 EXE 검증 시 `-NetAuthPath`로 배포본을 지정함.
+
+### 네이티브 검증 창에서 로그인 결과 확인
+
+- 배포 폴더는 `artifacts/pclient-login-preview-win-x64`임. `NetAuth.PClientPreview.exe`를 열고 같은 폴더에서 `.\NetAuth.exe --settings-pclient-preview`를 실행함.
+- 검증 모드에서 가상 ID `demo-user`와 가상 비밀번호 `demo-pass`를 저장한 뒤 **로그인 검증**을 선택함. 검증 창에는 제출 횟수가 표시되고, NetAuth에는 상태가 **인증 확인됨**으로 표시됨.
+- NetAuth는 실환경과 동일한 네이티브 입력 경로로 ID `1024`와 비밀번호 `1022`를 채움. 확인한 로그인 버튼 `1029`를 한 번 호출하고 상태 `1013`의 명시적인 성공 또는 거부 문구를 최대 8초 동안 확인함. 창 종료나 무응답은 **미확인**으로 처리함.
+- 자동화는 `NetAuth.PClientPreview` 프로세스와 테스트 계정 저장소에 한정됨. 실제 PClient 실행 모드의 **PClient 계정 채우기**는 입력까지만 수행함. 실제 로그인 활성화에는 버튼의 동작과 로그인 후 명시적인 상태 신호 검증이 필요함.
+
+### 작업 스케줄러에서 자동 실행 검증
+
+- 배포 폴더는 `artifacts/pclient-logon-settings-win-x64`임. 같은 폴더에서 `.\NetAuth.exe --settings-pclient-preview`로 가상 계정 `demo-user`와 `demo-pass`를 저장함.
+- **계정 관리 → 자동 로그인**을 켜면 현재 Windows 사용자의 로그온 작업을 등록함. 작업은 대화형 세션에서 일반 사용자 권한으로 실행되며 실행 중 중복 요청은 무시함. 작업 인수에는 계정 정보를 저장하지 않음.
+- 즉시 재현하려면 다음 명령을 사용한 뒤 30초 안에 `NetAuth.PClientPreview.exe`를 실행함. 검증 창의 제출 횟수가 1회로 증가하면 결과를 확인함.
+
+```powershell
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Start-ScheduledTask -TaskPath '\' -TaskName "NetAuth PClient Preview Logon - $sid"
+```
+
+- NetAuth는 검증 창이 늦게 열리는 경우 최대 30초 동안 기다림. 인증된 상태는 제출 없이 종료하며, 한 번 제출한 뒤 거부되거나 결과를 읽지 못하면 종료함.
+- 작업 스케줄러의 마지막 실행 결과는 `0`(인증 확인 또는 이미 인증됨), `3`(가상 계정 미등록), `4`(검증 창 대기 시간 초과), `5`(인증 미확인 또는 제출 전 중단), `6`(계정 저장소 읽기 실패)으로 표시됨.
+- 설정에서 **자동 로그인**을 끄거나 저장 계정을 삭제하면 진행 중인 검증 작업을 중지하고 등록을 해제함. 기존 수동 등록은 `tools/Register-PClientPreviewStartup.ps1 -Remove`로도 해제할 수 있음. 운영 모드의 자동 로그인 설정은 실제 PClient의 로그인 결과를 확인한 뒤 활성화할 예정임.
+- 2026-11-22 Windows x64 단일 배포본에서 설정 켜기·재열기·끄기, 늦게 열린 검증 창에 1회 제출(TC-03·TC-07), 기존 인증 시 추가 제출 없음(TC-02), 거부 후 종료(TC-04), 대기 중 등록 해제 및 작업 중지를 검증함. Windows 재로그온(TC-08)과 실제 PClient 연동은 별도 검증이 필요함.
 
 ### 설치 PC에 실행 파일 복사
 
+- 계정 채우기 검증용 Windows x64 단일 배포본은 `artifacts/account-fill-win-x64/NetAuth.exe`임. 이 파일만 복사해 실행함.
 - `artifacts/NetAuth-win-x64.zip`을 Windows x64 설치 PC에서 모두 압축 해제함. 생성된 `publish-win-x64` 폴더에서 `NetAuth.exe`를 실행함.
 - `publish-win-x64`는 .NET Desktop Runtime을 포함하는 배포 폴더임. 빌드는 `dotnet publish src/NetAuth -c Release -r win-x64 --self-contained true -o artifacts/publish-win-x64`로 수행함.
 - 기존 `artifacts/publish` 배포 폴더는 설치 PC의 .NET 10 Desktop Runtime을 사용함.
@@ -196,5 +225,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Inspect-PClient.ps1 -C
 | 2026-11-21 | 개발 PC | ID 전체 교체와 원문 복구 | 네이티브 검증용 창에서 빈 칸과 가상 ID가 채워진 칸을 8자리 ID로 교체함. 시작 시 빈 ID 및 기존 ID의 원문·선택 범위가 복구됨을 각각 확인함 |
 | 2026-11-21 | PClient 설치 PC | 실제 ID 전체 교체 | `-CheckIdReplacement` 실행 결과 `BothCasesMatchedAndRestored` 확인. `EmptyIdMatched`, `PrefilledIdMatched`, `OriginalIdRestored`, `OriginalSelectionRestored`가 모두 참임. 비밀번호 입력과 로그인 제출을 수행하지 않음 |
 | 2026-11-21 | 개발 PC | NetAuth 본체 ID 채우기 | 실제 NetAuth UI와 Windows 보호 저장소를 사용해 빈 ID·다른 ID 입력을 검증함. 인증됨 상태와 비밀번호 입력 상태에서는 ID를 보존함. 검증용 창에서 네 케이스 모두 비밀번호 변경 알림과 로그인 버튼 호출이 발생하지 않음 |
+| 2026-11-21 | 개발 PC | NetAuth 계정 채우기 | Debug 및 단일 배포본에서 빈 ID와 다른 ID를 저장 ID로 교체하고 가상 비밀번호 전체 일치를 확인함. 인증 상태(TC-02) 및 비밀번호가 이미 입력된 경우 입력을 건너뜀. 부분 입력 실패 시 기존 ID와 빈 비밀번호 상태 복구를 확인함. 모든 케이스에서 로그인 버튼 호출 0회임. PClient는 개발용 검증 창으로 대체함 |
+| 2026-11-21 | 개발 PC | 네이티브 로그인 검증 | Debug와 단일 배포본에서 입력 전용 5개 및 로그인 검증 6개 시나리오 통과. 가상 계정 일치 후 한 번 제출하고 성공·거부를 구분함(TC-01, TC-04). 버튼 누락 및 실제 프로세스명 격리에서 제출 0회, 시간 초과와 창 종료에서 미확인, 동시 요청에서 총 제출 1회 확인(TC-05, TC-07). 실제 PClient 버전과 로그인 후 상태는 별도 확인 필요 |
+| 2026-11-21 | 개발 PC | 기존 WPF 더미 회귀 | 응답 지연 시나리오에서 중간 대기 상태 관찰 실패가 이전 계정 채우기 배포본에서도 재현됨. 네이티브 검증 창의 로그인 결과 및 무응답 시나리오는 모두 통과함 |
+| 2026-11-21 | 개발 PC | 작업 스케줄러 로그온 작업 | 사용자 로그온 트리거, 대화형 세션, 일반 권한 및 중복 실행 무시 설정을 확인함. 배포용 EXE를 스케줄러에서 즉시 실행하여 검증 창이 늦게 열려도 총 1회 제출(TC-03·TC-07), 이미 인증된 상태에서 추가 제출 없음(TC-02), 거부 직후 종료(TC-04)를 확인함. 임시 작업 등록 해제 완료. 실제 PClient 및 재부팅 후 로그온(TC-08) 검증 대기 상태임 |
 | 2026-11-21 | 개발 PC | 런타임 포함 Windows x64 배포 | 런타임 위치를 빈 폴더로 지정했을 때 기존 배포본의 실행 실패를 재현함. 같은 조건에서 런타임 포함 배포본의 CLI와 실제 계정 설정 창 실행을 확인함. 설치 PC에서의 실행은 확인 대기 중임 |
 | 2026-11-21 | PClient 설치 PC | Smart App Control 차단 | 런타임 포함 배포본의 `NetAuth.dll`이 `0x800711C7`로 차단됨. 이벤트 3077·3033과 정책 ID를 확인함. 개발 PC 배포본 EXE와 DLL은 `NotSigned`이며, 조사한 로컬 인증서 저장소에서 서명용 개인키를 찾지 못함 |

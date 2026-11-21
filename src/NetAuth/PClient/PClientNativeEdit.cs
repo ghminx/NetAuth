@@ -41,40 +41,62 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
 
     public int? ReadLength() => IsExpectedEdit() ? ReadNumber(GetTextLength) : null;
 
-    public PClientIdFillResult FillId(string userId)
-    {
-        if (string.IsNullOrWhiteSpace(userId) || userId.IndexOfAny(['\0', '\r', '\n']) >= 0 ||
-            userId.Length >= ushort.MaxValue)
-        {
-            return PClientIdFillResult.IdNotAccepted;
-        }
+    public bool CanAccept(string value, bool masked) =>
+        value.Length > 0 && value.Length < ushort.MaxValue &&
+        value.IndexOfAny(['\0', '\r', '\n']) < 0 &&
+        IsWritable(masked) && ReadNumber(GetTextLimit) is int limit && value.Length <= limit;
 
+    public (string Text, int Selection)? ReadIdState()
+    {
         var original = ReadIdText();
         var selection = ReadNumber(GetSelection);
-        var limit = ReadNumber(GetTextLimit);
-        if (original is null || selection is null or -1 || limit is null ||
-            original.Length > limit || userId.Length > limit)
-        {
-            return PClientIdFillResult.IdNotAccepted;
-        }
-        if (original == userId || ReplaceAndVerify(original, userId))
-        {
-            return PClientIdFillResult.Filled;
-        }
-
-        var current = ReadIdText();
-        var restored = current is not null && (current == original || ReplaceAndVerify(current, original)) &&
-            SelectRange(selection.Value & 0xFFFF, (int)((uint)selection.Value >> 16));
-        return restored ? PClientIdFillResult.IdNotAccepted : PClientIdFillResult.RestorationNotVerified;
+        return original is not null && selection is not (null or -1) &&
+            ReadNumber(GetTextLimit) is int limit && original.Length <= limit
+            ? (original, selection.Value)
+            : null;
     }
 
-    private bool ReplaceAndVerify(string previous, string value) =>
-        IsWritableId() &&
-        SelectRange(0, previous.Length) &&
-        IsWritableId() &&
-        SendReplacement(handle, ReplaceSelection, IntPtr.Zero, value,
-            AbortIfHung, TimeoutMilliseconds, out _) != IntPtr.Zero &&
+    public bool RestoreId(string original, int selection)
+    {
+        var current = ReadIdText();
+        return current is not null && (current == original || ReplaceAndVerifyId(current, original)) &&
+            SelectRange(selection & 0xFFFF, (int)((uint)selection >> 16));
+    }
+
+    public bool ReplaceAndVerifyId(string previous, string value) =>
+        Replace(0, previous.Length, value, masked: false) &&
         ReadIdText() == value;
+
+    public PClientAccountFillResult FillEmptyPassword(string password)
+    {
+        if (!IsWritable(masked: true) || ReadLength() is not int length)
+        {
+            return PClientAccountFillResult.PasswordNotAccepted;
+        }
+        if (length != 0)
+        {
+            return PClientAccountFillResult.PasswordNotEmpty;
+        }
+
+        var delivered = Replace(0, 0, password, masked: true);
+        var writtenLength = ReadLength();
+        // 운영 비밀번호의 원문을 읽지 않고 마스킹과 입력 길이로 확인
+        if (delivered && IsWritable(masked: true) && writtenLength == password.Length)
+        {
+            return PClientAccountFillResult.Filled;
+        }
+
+        var cleared = writtenLength == 0 || (writtenLength is > 0 and < ushort.MaxValue &&
+            Replace(0, writtenLength.Value, string.Empty, masked: true) && ReadLength() == 0);
+        return cleared ? PClientAccountFillResult.PasswordNotAccepted : PClientAccountFillResult.RestorationNotVerified;
+    }
+
+    private bool Replace(int start, int end, string value, bool masked) =>
+        IsWritable(masked) &&
+        SelectRange(start, end) &&
+        IsWritable(masked) &&
+        SendReplacement(handle, ReplaceSelection, IntPtr.Zero, value,
+            AbortIfHung, TimeoutMilliseconds, out _) != IntPtr.Zero;
 
     private bool SelectRange(int start, int end) =>
         IsExpectedEdit() &&
@@ -84,7 +106,7 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
 
     private string? ReadIdText()
     {
-        if (!IsWritableId() || ReadNumber(GetTextLength) is not int length ||
+        if (!IsWritable(masked: false) || ReadNumber(GetTextLength) is not int length ||
             length < 0 || length >= ushort.MaxValue - 1)
         {
             return null;
@@ -97,9 +119,9 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             ReadNumber(GetTextLength) == length ? buffer.ToString() : null;
     }
 
-    private bool IsWritableId() =>
-        controlId == 1024 && IsExpectedEdit() && IsWindowEnabled(handle) &&
-        (GetWindowLong(handle, WindowStyleIndex) & ReadOnlyStyle) == 0 && IsMasked() == false;
+    private bool IsWritable(bool masked) =>
+        IsExpectedEdit() && IsWindowEnabled(handle) &&
+        (GetWindowLong(handle, WindowStyleIndex) & ReadOnlyStyle) == 0 && IsMasked() == masked;
 
     private bool? IsMasked() =>
         (GetWindowLong(handle, WindowStyleIndex) & PasswordStyle) != 0

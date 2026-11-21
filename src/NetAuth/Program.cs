@@ -1,6 +1,10 @@
+using System.IO;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using NetAuth.PClient;
+using NetAuth.Security;
 using NetAuth.UI;
 
 namespace NetAuth;
@@ -13,8 +17,13 @@ internal static class Program
         switch (args)
         {
             case []:
+                return OpenSettings(AccountWindowMode.PClient);
             case ["--settings-dummy"]:
-                return new Application().Run(new AccountWindow(useDummyAccount: args.Length == 1));
+                return OpenSettings(AccountWindowMode.Dummy);
+            case ["--settings-pclient-preview"]:
+                return OpenSettings(AccountWindowMode.PClientPreview);
+            case ["--login-pclient-preview-at-logon"]:
+                return RunLogonPreview();
             case ["--probe-dummy"]:
                 Console.WriteLine(DummyClientProbe.Read());
                 return 0;
@@ -25,8 +34,42 @@ internal static class Program
                 Console.WriteLine($"NetAuth | UI Automation: {typeof(AutomationElement).Assembly.GetName().Name}");
                 return 0;
             default:
-                Console.Error.WriteLine("사용법: NetAuth [--settings-dummy | --probe-dummy | --login-dummy | --check-ui-automation]");
+                Console.Error.WriteLine(
+                    "사용법: NetAuth [--settings-dummy | --settings-pclient-preview | --login-pclient-preview-at-logon | " +
+                    "--probe-dummy | --login-dummy | --check-ui-automation]");
                 return 2;
         }
+    }
+
+    private static int OpenSettings(AccountWindowMode mode) => new Application().Run(new AccountWindow(mode));
+
+    private static int RunLogonPreview()
+    {
+        LoginAccount? account;
+        try
+        {
+            account = new CredentialStore(useDummyAccount: true).Load();
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or
+            CryptographicException or JsonException or InvalidDataException)
+        {
+            Console.Error.WriteLine("AccountStoreUnavailable");
+            return 6;
+        }
+
+        if (account is null)
+        {
+            Console.WriteLine("AccountNotRegistered");
+            return 3;
+        }
+
+        var result = PClientAccountFill.LoginPreviewAtLogon(account);
+        Console.WriteLine(result);
+        return result switch
+        {
+            PClientAccountFillResult.Authenticated or PClientAccountFillResult.AlreadyAuthenticated => 0,
+            PClientAccountFillResult.WindowNotFound => 4,
+            _ => 5
+        };
     }
 }
