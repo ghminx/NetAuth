@@ -18,7 +18,7 @@ dotnet run --project src/NetAuth --no-build
 & ./tests/Startup.Tests.ps1
 ```
 
-빌드 명령은 복원과 Debug 컴파일을 수행함. 실행 명령은 계정 설정 창을 시작함. 인수 `-- --settings-dummy`를 추가하면 가상 계정용 설정 창을 시작함. 배포 파일은 `dotnet publish src/NetAuth -c Release -o artifacts/publish`로 생성함.
+빌드 명령은 복원과 Debug 컴파일을 수행함. 실행 명령은 계정 설정 창을 시작함. 인수 `-- --settings-dummy`를 추가하면 가상 계정용 설정 창을 시작함. Windows 설치본은 `.\tools\Build-Nsis.ps1`로 생성함. 버전 지정과 배포 전 확인은 [NSIS 배포 안내](docs/NSIS_DISTRIBUTION.md)를 참고함.
 
 ## 코드 스타일과 검증
 
