@@ -5,10 +5,11 @@ using System.Text.Json;
 
 namespace NetAuth.Security;
 
-internal sealed class LoginAccount(string userId, string password)
+internal sealed class LoginAccount(string userId, string password, PClientExecutableIdentity? executableIdentity = null)
 {
     public string UserId { get; } = userId;
     public string Password { get; } = password;
+    public PClientExecutableIdentity? ExecutableIdentity { get; } = executableIdentity;
 }
 
 internal sealed class CredentialStore(bool useDummyAccount)

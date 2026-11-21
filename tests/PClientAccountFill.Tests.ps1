@@ -12,6 +12,8 @@ $previewAccountPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationD
 $netAuth = (Resolve-Path -LiteralPath $NetAuthPath).Path
 $work = Join-Path ([IO.Path]::GetTempPath()) ('NetAuth-AccountFill-' + [Guid]::NewGuid().ToString('N'))
 $fixture = Join-Path $work 'PClientUI.exe'
+$otherDirectory = Join-Path $work 'other'
+$otherFixture = Join-Path $otherDirectory 'PClientUI.exe'
 $previewFixture = Join-Path $work 'NetAuth.PClientPreview.exe'
 $valuePattern = [System.Windows.Automation.ValuePattern]::Pattern
 $invokePattern = [System.Windows.Automation.InvokePattern]::Pattern
@@ -106,6 +108,8 @@ public sealed class AccountFillFixture : Form
                     form.AddControl("Button", "로그인", 0x50010000, 120, 1029);
                 if (scenario == "partial")
                     new TruncatingEdit().AssignHandle(password);
+                if (scenario == "during-selection" || scenario == "during-write")
+                    new ConcurrentEdit(scenario == "during-selection" ? 0x00B1 : 0x00C2).AssignHandle(password);
                 form.Text = form.TestsLogin ? "NetAuth PClient 검증 | 제출 0회" : "Fixture ready";
             };
             Application.Run(form);
@@ -131,6 +135,24 @@ public sealed class AccountFillFixture : Form
         }
     }
 
+    private sealed class ConcurrentEdit : NativeWindow
+    {
+        private readonly int trigger;
+        private bool inserted;
+
+        public ConcurrentEdit(int trigger) { this.trigger = trigger; }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (!inserted && message.Msg == trigger)
+            {
+                inserted = true;
+                SetWindowText(Handle, "manual-entry");
+            }
+            base.WndProc(ref message);
+        }
+    }
+
     protected override void WndProc(ref Message message)
     {
         // 테스트 창 내부에서만 가상 비밀번호를 비교하고 결과만 노출
@@ -149,6 +171,8 @@ public sealed class AccountFillFixture : Form
             {
                 var password = ReadEditText(Handle, 1022);
                 Text = password.Length == 0 ? "Fixture password cleared"
+                    : password == "manual-entry" ? "Fixture manual entry unchanged"
+                    : password.Contains("manual-entry") ? "Fixture manual entry preserved"
                     : password == "fixture-only-password!가" ? "Fixture password matched" : "Fixture password mismatch";
             }
         }
@@ -192,6 +216,8 @@ public sealed class AccountFillFixture : Form
 '@
     [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($fixture)) | Out-Null
     Copy-Item -LiteralPath $fixture -Destination $previewFixture
+    New-Item -ItemType Directory -Path $otherDirectory | Out-Null
+    Copy-Item -LiteralPath $fixture -Destination $otherFixture
 
     $worker = Open-App $netAuth '--login-pclient-preview-at-logon'
     try {
@@ -208,6 +234,7 @@ public sealed class AccountFillFixture : Form
     $storedId = '76543210'
     (Find-Control $settings 'PClientAccountId').GetCurrentPattern($valuePattern).SetValue($storedId)
     (Find-Control $settings 'PClientAccountPassword').GetCurrentPattern($valuePattern).SetValue('fixture-only-password!가')
+    (Find-Control $settings 'PClientExecutablePath').GetCurrentPattern($valuePattern).SetValue($fixture)
     (Find-Control $settings 'SaveAccount').GetCurrentPattern($invokePattern).Invoke()
     Wait-For {
         $button = Find-Control $settings 'FillPClientAccount'
@@ -218,17 +245,25 @@ public sealed class AccountFillFixture : Form
         throw 'Real PClient automatic login must remain unavailable until its result is verified.'
     }
 
-    foreach ($scenario in 'empty', 'prefilled', 'authenticated', 'password', 'partial') {
-        $client = Open-App $fixture $scenario
+    foreach ($scenario in 'unregistered-image', 'empty', 'prefilled', 'authenticated', 'password', 'during-selection', 'during-write', 'partial', 'modified-image') {
+        $targetExecutable = if ($scenario -eq 'unregistered-image') { $otherFixture } else { $fixture }
+        if ($scenario -eq 'modified-image') {
+            # 실행 가능한 더미의 끝에 표시 바이트를 추가해 등록 당시와 다른 해시 재현
+            $stream = [IO.File]::Open($fixture, 'Append', 'Write', 'None')
+            try { $stream.WriteByte(0x2A) } finally { $stream.Dispose() }
+        }
+        $client = Open-App $targetExecutable $scenario
         Wait-For { $client.Refresh(); $client.MainWindowTitle -eq 'Fixture ready' } "$scenario window"
         $handle = $client.MainWindowHandle
         $initialId = [AccountFillFixture]::ReadId($handle)
         $button = Find-Control $settings 'FillPClientAccount'
         $button.GetCurrentPattern($invokePattern).Invoke()
         $expected = switch ($scenario) {
+            { $_ -in 'unregistered-image', 'modified-image' } { '실행 중인 PClient가 등록한 파일과 일치하지 않습니다. 설치 위치와 버전을 확인하세요.' }
             'authenticated' { 'PClient에서 로그아웃 상태를 확인할 수 없습니다.' }
             'password' { 'PClient의 비밀번호란을 비운 뒤 다시 시도하세요.' }
-            'partial' { 'PClient에서 비밀번호 입력을 확인할 수 없습니다.' }
+            'during-selection' { 'PClient의 비밀번호란을 비운 뒤 다시 시도하세요.' }
+            { $_ -in 'partial', 'during-write' } { '입력란 복구를 확인할 수 없습니다. PClient의 입력란을 확인하세요.' }
             default { 'PClient에 ID와 비밀번호를 채웠습니다.' }
         }
         $expectedId = if ($scenario -in 'empty', 'prefilled') { $storedId } else { $initialId }
@@ -238,7 +273,9 @@ public sealed class AccountFillFixture : Form
         } "$scenario result"
 
         $expectedTitle = switch ($scenario) {
-            'partial' { 'Fixture password cleared' }
+            'partial' { 'Fixture password mismatch' }
+            'during-selection' { 'Fixture manual entry unchanged' }
+            'during-write' { 'Fixture manual entry preserved' }
             { $_ -in 'empty', 'prefilled' } { 'Fixture password matched' }
             default { 'Fixture ready' }
         }
@@ -427,7 +464,23 @@ public sealed class AccountFillFixture : Form
                 $null -eq (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue) -and
                 $null -eq (Get-Process -Name NetAuth -ErrorAction SilentlyContinue | Where-Object Id -ne $app.Id)
         } 'Automatic login disabled in NetAuth settings and waiting worker stopped'
-        Write-Output 'Passed automatic login settings on/off, saved state, delayed target, single run, already authenticated, and rejection.'
+
+        $updatingTask = [Threading.Mutex]::new($false, 'Local\NetAuth.PClientPreview.Startup')
+        try {
+            (Find-Control $settings 'DeleteAccount').GetCurrentPattern($invokePattern).Invoke()
+            Wait-For {
+                $confirmation = Find-Control $settings 'ConfirmDelete'
+                $confirmation -and -not $confirmation.Current.IsOffscreen
+            } 'Preview account deletion confirmation'
+            (Find-Control $settings 'ConfirmDelete').GetCurrentPattern($invokePattern).Invoke()
+            Wait-For {
+                -not (Test-Path -LiteralPath $previewAccountPath) -and
+                    (Find-Control $settings 'AccountFeedback').Current.Name -like '저장된 계정은 삭제했습니다.*'
+            } 'Preview account deleted even though task cleanup failed'
+        } finally {
+            $updatingTask.Dispose()
+        }
+        Write-Output 'Passed automatic login settings on/off, saved state, delayed target, single run, already authenticated, rejection, and account deletion when startup cleanup fails.'
     }
 
     if ($PreviewDirectory) {
@@ -443,10 +496,11 @@ public sealed class AccountFillFixture : Form
     Close-App $overlap
     Close-App $client
     Close-App $app
-    foreach ($file in $accountPath, $previewAccountPath, $fixture, $previewFixture) {
+    foreach ($file in $accountPath, $previewAccountPath, $fixture, $previewFixture, $otherFixture) {
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
     }
+    if (Test-Path -LiteralPath $otherDirectory) { Remove-Item -LiteralPath $otherDirectory }
     Remove-Item -LiteralPath $work
 }
 
-Write-Output 'Passed 5 fill-only cases and 6 native login preview cases (including concurrent requests).'
+Write-Output 'Passed 9 fill-only cases, including an unregistered path, a modified executable and input arriving during selection/write, and 6 native login preview cases.'

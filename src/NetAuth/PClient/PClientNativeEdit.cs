@@ -56,15 +56,15 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             : null;
     }
 
-    public bool RestoreId(string original, int selection)
+    public bool RestoreId(string original, int selection, string assigned)
     {
         var current = ReadIdText();
-        return current is not null && (current == original || ReplaceAndVerifyId(current, original)) &&
+        return (current == original || current == assigned && ReplaceAndVerifyId(assigned, original)) &&
             SelectRange(selection & 0xFFFF, (int)((uint)selection >> 16));
     }
 
     public bool ReplaceAndVerifyId(string previous, string value) =>
-        Replace(0, previous.Length, value, masked: false) &&
+        ReadIdText() == previous && Replace(0, previous.Length, value, masked: false) &&
         ReadIdText() == value;
 
     public PClientAccountFillResult FillEmptyPassword(string password)
@@ -78,7 +78,17 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             return PClientAccountFillResult.PasswordNotEmpty;
         }
 
-        var delivered = Replace(0, 0, password, masked: true);
+        if (!SelectRange(0, 0) || !IsWritable(masked: true) || ReadLength() is not int lengthBeforeWrite)
+        {
+            return PClientAccountFillResult.PasswordNotAccepted;
+        }
+        if (lengthBeforeWrite != 0)
+        {
+            return PClientAccountFillResult.PasswordNotEmpty;
+        }
+
+        var delivered = SendReplacement(handle, ReplaceSelection, IntPtr.Zero, password,
+            AbortIfHung, TimeoutMilliseconds, out _) != IntPtr.Zero;
         var writtenLength = ReadLength();
         // 운영 비밀번호의 원문을 읽지 않고 마스킹과 입력 길이로 확인
         if (delivered && IsWritable(masked: true) && writtenLength == password.Length)
@@ -86,9 +96,8 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             return PClientAccountFillResult.Filled;
         }
 
-        var cleared = writtenLength == 0 || (writtenLength is > 0 and < ushort.MaxValue &&
-            Replace(0, writtenLength.Value, string.Empty, masked: true) && ReadLength() == 0);
-        return cleared ? PClientAccountFillResult.PasswordNotAccepted : PClientAccountFillResult.RestorationNotVerified;
+        // 원문을 읽지 않으므로 실패 후 남은 문자의 소유권을 확인할 수 없어 입력란 보존
+        return writtenLength == 0 ? PClientAccountFillResult.PasswordNotAccepted : PClientAccountFillResult.RestorationNotVerified;
     }
 
     private bool Replace(int start, int end, string value, bool masked) =>

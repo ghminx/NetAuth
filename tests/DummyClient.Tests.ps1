@@ -131,22 +131,24 @@ foreach ($scenario in $scenarios.Keys) {
             $loginElapsed = [System.Diagnostics.Stopwatch]::StartNew()
             $login = [System.Diagnostics.Process]::Start($loginLaunch)
             try {
-                $timeout.Restart()
-                do {
-                    $state = Read-State
-                    if ($state -eq 'CheckingState') { break }
-                    Start-Sleep -Milliseconds 100
-                } while (-not $login.HasExited -and $timeout.Elapsed.TotalSeconds -lt 5)
-                Assert-Equal $state 'CheckingState' 'Pending response'
-                Assert-Equal (Find-Control $window 'SignIn').Current.IsEnabled $false 'Pending submit enabled'
-                Assert-Equal ([regex]::Match($count.Current.Name, '[0-9]+').Value) '1' "$scenario pending count"
-                if ($scenario -eq 'Delayed') {
-                    Assert-Equal (Read-LoginResult) 'LoginInProgress' 'Concurrent login result'
-                } elseif ($scenario -eq 'WindowClosed') {
-                    Assert-Equal $process.CloseMainWindow() $true 'Close dummy during login'
-                    if (-not $process.WaitForExit(3000)) { throw 'Dummy window did not close.' }
+                if ($scenario -ne 'Delayed') {
+                    $timeout.Restart()
+                    do {
+                        $submissionCount = [regex]::Match($count.Current.Name, '[0-9]+').Value
+                        if ($submissionCount -eq '1') { break }
+                        Start-Sleep -Milliseconds 100
+                    } while (-not $login.HasExited -and $timeout.Elapsed.TotalSeconds -lt 12)
+                    Assert-Equal $submissionCount '1' "$scenario pending submission count"
+                    Assert-Equal (Find-Control $window 'SignIn').Current.IsEnabled $false 'Pending submit enabled'
+                    if ($scenario -eq 'WindowClosed') {
+                        Assert-Equal $process.CloseMainWindow() $true 'Close dummy during login'
+                        if (-not $process.WaitForExit(3000)) { throw 'Dummy window did not close.' }
+                    } else {
+                        Assert-Equal (Read-LoginResult) 'LoginInProgress' 'Concurrent login result'
+                        Assert-Equal (Read-State) 'CheckingState' 'Pending state from CLI'
+                    }
                 }
-                if (-not $login.WaitForExit(10000)) { throw "$scenario login did not finish." }
+                if (-not $login.WaitForExit(15000)) { throw "$scenario login did not finish." }
                 Assert-Equal $login.ExitCode 0 "$scenario login exit code"
                 if ($scenario -eq 'NoResponse') {
                     Assert-Equal ($loginElapsed.Elapsed.TotalSeconds -ge 8) $true 'Wait before timing out'

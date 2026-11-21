@@ -18,6 +18,7 @@ SetFont "Malgun Gothic" 9
 !define MUI_HEADERIMAGE_BITMAP "${APP_HEADER_BITMAP}"
 !define MUI_HEADERIMAGE_BITMAP_STRETCH AspectFitHeight
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 !define MUI_WELCOMEPAGE_TITLE "$(NetAuthWelcomeTitle)"
 !define MUI_WELCOMEPAGE_TEXT "$(NetAuthWelcomeText)"
@@ -61,6 +62,43 @@ LangString UninstallFailed ${LANG_KOREAN} "NetAuth를 제거하지 못했습니�
 LangString SetupBusy ${LANG_ENGLISH} "Another NetAuth setup operation is already running."
 LangString SetupBusy ${LANG_KOREAN} "NetAuth 설치 또는 제거가 진행 중입니다. 완료된 뒤 다시 시도해 주세요."
 
+Var PreviousInstall
+Var PreviousVersion
+Var AppReplaced
+Var UninstallerReplaced
+Var ShortcutReplaced
+
+!macro ReplaceInstalledFile PATH STAGED REPLACED
+    ClearErrors
+    ${If} ${FileExists} "${PATH}"
+        Rename "${PATH}" "${PATH}.netauth-backup"
+        IfErrors install_failed
+    ${EndIf}
+    Rename "${STAGED}" "${PATH}"
+    IfErrors install_failed
+    StrCpy ${REPLACED} 1
+!macroend
+
+!macro RestoreInstalledFile PATH REPLACED
+    ${If} ${FileExists} "${PATH}.netauth-backup"
+        System::Call 'kernel32::MoveFileExW(w "${PATH}.netauth-backup", w "${PATH}", i 1) i .r0'
+    ${ElseIf} ${REPLACED} == 1
+        Delete "${PATH}"
+    ${EndIf}
+!macroend
+
+!macro WriteInstallRegistration VERSION
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "NetAuth"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "NetAuth"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\NetAuth.exe,0"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
+    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
+    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+!macroend
+
 !macro LockSetup
     System::Call 'kernel32::CreateMutexW(p 0, i 0, w "Local\NetAuth.Setup") p .r0 ?e'
     Pop $1
@@ -84,29 +122,54 @@ FunctionEnd
 Section "NetAuth"
     SetShellVarContext current
     SetRegView 64
+    ReadRegStr $PreviousInstall HKCU "${UNINSTALL_KEY}" "InstallLocation"
+    ${If} $PreviousInstall != ""
+    ${AndIf} $PreviousInstall != "$INSTDIR"
+        Goto install_report_failure
+    ${EndIf}
+    IfFileExists "$INSTDIR\NetAuth.exe.netauth-backup" install_report_failure
+    IfFileExists "$INSTDIR\Uninstall.exe.netauth-backup" install_report_failure
+    IfFileExists "$SMPROGRAMS\NetAuth.lnk.netauth-backup" install_report_failure
+
+    ClearErrors
     SetOutPath "$INSTDIR"
+    IfErrors install_report_failure
     ClearErrors
     File /oname=NetAuth.exe.new "${APP_EXE}"
     IfErrors install_failed
-    System::Call 'kernel32::MoveFileExW(w "$INSTDIR\NetAuth.exe.new", w "$INSTDIR\NetAuth.exe", i 1) i .r0'
-    StrCmp $0 0 install_failed
-
-    WriteUninstaller "$INSTDIR\Uninstall.exe"
-    CreateShortcut "$SMPROGRAMS\NetAuth.lnk" "$INSTDIR\NetAuth.exe" "" "$INSTDIR\NetAuth.exe" 0
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "NetAuth"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "NetAuth"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\NetAuth.exe,0"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '$\"$INSTDIR\Uninstall.exe$\"'
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "QuietUninstallString" '$\"$INSTDIR\Uninstall.exe$\" /S'
-    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
-    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
+    WriteUninstaller "$INSTDIR\Uninstall.exe.new"
     IfErrors install_failed
+    CreateShortcut "$SMPROGRAMS\NetAuth.pending.lnk" "$INSTDIR\NetAuth.exe" "" "$INSTDIR\NetAuth.exe" 0
+    IfErrors install_failed
+
+    !insertmacro ReplaceInstalledFile "$INSTDIR\Uninstall.exe" "$INSTDIR\Uninstall.exe.new" $UninstallerReplaced
+    !insertmacro ReplaceInstalledFile "$SMPROGRAMS\NetAuth.lnk" "$SMPROGRAMS\NetAuth.pending.lnk" $ShortcutReplaced
+    !insertmacro ReplaceInstalledFile "$INSTDIR\NetAuth.exe" "$INSTDIR\NetAuth.exe.new" $AppReplaced
+
+    ClearErrors
+    ${If} $PreviousInstall == ""
+        !insertmacro WriteInstallRegistration "${APP_VERSION}"
+    ${Else}
+        WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
+    ${EndIf}
+    IfErrors install_failed
+    Delete "$INSTDIR\NetAuth.exe.netauth-backup"
+    Delete "$INSTDIR\Uninstall.exe.netauth-backup"
+    Delete "$SMPROGRAMS\NetAuth.lnk.netauth-backup"
     Goto install_done
 
 install_failed:
+    ${If} $PreviousInstall == ""
+    ${AndIf} $AppReplaced == 1
+        DeleteRegKey HKCU "${UNINSTALL_KEY}"
+    ${EndIf}
+    !insertmacro RestoreInstalledFile "$INSTDIR\NetAuth.exe" $AppReplaced
+    !insertmacro RestoreInstalledFile "$SMPROGRAMS\NetAuth.lnk" $ShortcutReplaced
+    !insertmacro RestoreInstalledFile "$INSTDIR\Uninstall.exe" $UninstallerReplaced
     Delete "$INSTDIR\NetAuth.exe.new"
+    Delete "$INSTDIR\Uninstall.exe.new"
+    Delete "$SMPROGRAMS\NetAuth.pending.lnk"
+install_report_failure:
     MessageBox MB_OK|MB_ICONSTOP "$(InstallFailed)" /SD IDOK
     SetErrorLevel 1
     Abort
@@ -116,17 +179,49 @@ SectionEnd
 Section "Uninstall"
     SetShellVarContext current
     SetRegView 64
+    ReadRegStr $PreviousInstall HKCU "${UNINSTALL_KEY}" "InstallLocation"
+    ${If} $PreviousInstall != ""
+    ${AndIf} $PreviousInstall != "$INSTDIR"
+        Goto uninstall_report_failure
+    ${EndIf}
+    ReadRegStr $PreviousVersion HKCU "${UNINSTALL_KEY}" "DisplayVersion"
+
     ClearErrors
+    ${If} ${FileExists} "$SMPROGRAMS\NetAuth.lnk"
+        Rename "$SMPROGRAMS\NetAuth.lnk" "$SMPROGRAMS\NetAuth.removing.lnk"
+        IfErrors uninstall_report_failure
+    ${EndIf}
+    ${If} ${FileExists} "$INSTDIR\NetAuth.exe"
+        ExecWait '"$INSTDIR\NetAuth.exe" --remove-pclient-preview-startup' $0
+        IfErrors uninstall_failed
+        StrCmp $0 0 +2
+        Goto uninstall_failed
+    ${EndIf}
     Delete "$INSTDIR\NetAuth.exe"
     IfErrors uninstall_failed
-    Delete "$SMPROGRAMS\NetAuth.lnk"
-    DeleteRegKey HKCU "${UNINSTALL_KEY}"
+    Delete "$SMPROGRAMS\NetAuth.removing.lnk"
+    IfErrors uninstall_failed
+    ${If} $PreviousInstall != ""
+        DeleteRegKey HKCU "${UNINSTALL_KEY}"
+        IfErrors uninstall_failed
+    ${EndIf}
     Delete "$INSTDIR\Uninstall.exe"
+    ${If} ${Errors}
+        ${If} $PreviousInstall != ""
+            !insertmacro WriteInstallRegistration "$PreviousVersion"
+        ${EndIf}
+        Goto uninstall_failed
+    ${EndIf}
     SetOutPath "$TEMP"
     RMDir "$INSTDIR"
     Goto uninstall_done
 
 uninstall_failed:
+    ${If} ${FileExists} "$INSTDIR\NetAuth.exe"
+    ${AndIf} ${FileExists} "$SMPROGRAMS\NetAuth.removing.lnk"
+        Rename "$SMPROGRAMS\NetAuth.removing.lnk" "$SMPROGRAMS\NetAuth.lnk"
+    ${EndIf}
+uninstall_report_failure:
     MessageBox MB_OK|MB_ICONSTOP "$(UninstallFailed)" /SD IDOK
     SetErrorLevel 1
     Abort

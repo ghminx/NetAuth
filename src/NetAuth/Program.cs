@@ -24,6 +24,8 @@ internal static class Program
                 return OpenSettings(AccountWindowMode.PClientPreview);
             case ["--login-pclient-preview-at-logon"]:
                 return RunLogonPreview();
+            case ["--remove-pclient-preview-startup"]:
+                return RemovePreviewStartup();
             case ["--probe-dummy"]:
                 Console.WriteLine(DummyClientProbe.Read());
                 return 0;
@@ -36,12 +38,26 @@ internal static class Program
             default:
                 Console.Error.WriteLine(
                     "사용법: NetAuth [--settings-dummy | --settings-pclient-preview | --login-pclient-preview-at-logon | " +
-                    "--probe-dummy | --login-dummy | --check-ui-automation]");
+                    "--remove-pclient-preview-startup | --probe-dummy | --login-dummy | --check-ui-automation]");
                 return 2;
         }
     }
 
     private static int OpenSettings(AccountWindowMode mode) => new Application().Run(new AccountWindow(mode));
+
+    private static int RemovePreviewStartup()
+    {
+        try
+        {
+            PClientPreviewStartup.Disable();
+            return 0;
+        }
+        catch (Exception error) when (PClientPreviewStartup.IsOperationError(error))
+        {
+            Console.Error.WriteLine("PreviewStartupRemovalFailed");
+            return 7;
+        }
+    }
 
     private static int RunLogonPreview()
     {

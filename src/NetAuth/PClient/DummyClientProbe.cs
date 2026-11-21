@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
 namespace NetAuth.PClient;
 
 internal static class DummyClientProbe
 {
+    private const int UnexpectedAutomationError = unchecked((int)0x8000FFFF);
     public static string Read() => WithDummyWindow(ReadWindow);
 
     public static string Login(string accountId, string accountPassword)
@@ -31,9 +33,11 @@ internal static class DummyClientProbe
                 return "MultipleDummyClients";
             }
 
+            var process = processes[0];
+            var handle = IntPtr.Zero;
             try
             {
-                var handle = processes[0].MainWindowHandle;
+                handle = process.MainWindowHandle;
                 if (handle == IntPtr.Zero)
                 {
                     return "WaitingForWindow";
@@ -49,6 +53,11 @@ internal static class DummyClientProbe
                 return operate(window);
             }
             catch (ElementNotAvailableException)
+            {
+                return "UnknownState";
+            }
+            catch (COMException error) when (error.HResult == UnexpectedAutomationError &&
+                (process.HasExited || handle != IntPtr.Zero && !IsWindow(handle)))
             {
                 return "UnknownState";
             }
@@ -127,4 +136,7 @@ internal static class DummyClientProbe
 
     private static AutomationElement? Find(AutomationElement window, string id) =>
         window.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, id));
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr window);
 }

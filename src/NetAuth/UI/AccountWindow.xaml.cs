@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Media;
+using Microsoft.Win32;
 using NetAuth.PClient;
 using NetAuth.Security;
 
@@ -22,6 +23,7 @@ public partial class AccountWindow : Window
     private readonly CredentialStore store;
     private readonly AccountWindowMode mode;
     private string? registeredId;
+    private string? registeredExecutablePath;
     private bool refreshingAutomaticLogin;
 
     internal AccountWindow(AccountWindowMode mode)
@@ -33,6 +35,7 @@ public partial class AccountWindow : Window
 
         DummyLogin.Visibility = usesTestAccount ? Visibility.Visible : Visibility.Collapsed;
         FillPClientAccountButton.Visibility = usesTestAccount ? Visibility.Collapsed : Visibility.Visible;
+        ExecutableRegistration.Visibility = usesTestAccount ? Visibility.Collapsed : Visibility.Visible;
         AutomaticLoginSetting.Visibility = mode == AccountWindowMode.Dummy ? Visibility.Collapsed : Visibility.Visible;
         if (mode == AccountWindowMode.PClientPreview)
         {
@@ -42,7 +45,9 @@ public partial class AccountWindow : Window
 
         try
         {
-            ShowOverview(store.Load()?.UserId);
+            var account = store.Load();
+            registeredExecutablePath = account?.ExecutableIdentity?.Path;
+            ShowOverview(account?.UserId);
             if (registeredId is null)
             {
                 ShowEditor();
@@ -89,12 +94,16 @@ public partial class AccountWindow : Window
                 return;
             }
 
-            AutoLoginAtLogon.IsChecked = PClientPreviewStartup.IsEnabled();
+            var startup = PClientPreviewStartup.ReadState();
+            AutoLoginAtLogon.IsChecked = startup == PClientPreviewStartupState.EnabledHere;
             AutoLoginAtLogon.IsEnabled = true;
-            AutoLoginDescription.Text = "Windows 로그인 시 테스트용 PClient를 찾아 로그인을 한 번 시도합니다.";
+            AutoLoginDescription.Text = startup == PClientPreviewStartupState.EnabledElsewhere
+                ? "다른 NetAuth 경로에 등록되어 있습니다. 여기서 켜면 실행 위치를 변경합니다."
+                : "Windows 로그인 시 테스트용 PClient를 찾아 로그인을 한 번 시도합니다.";
         }
-        catch (Exception error) when (IsStartupError(error))
+        catch (Exception error) when (PClientPreviewStartup.IsOperationError(error))
         {
+            AutoLoginAtLogon.IsChecked = null;
             AutoLoginDescription.Text = "Windows 시작 작업 상태를 읽을 수 없습니다.";
         }
         finally
@@ -115,23 +124,23 @@ public partial class AccountWindow : Window
             if (AutoLoginAtLogon.IsChecked == true)
             {
                 PClientPreviewStartup.Enable();
+                RefreshAutomaticLogin();
                 ShowFeedback("Windows 로그인 시 자동으로 실행되도록 등록했습니다.");
             }
             else
             {
-                PClientPreviewStartup.Disable();
-                ShowFeedback("Windows 로그인 시 실행 등록을 해제했습니다.");
+                var removed = PClientPreviewStartup.Disable();
+                RefreshAutomaticLogin();
+                ShowFeedback(removed ? "Windows 로그인 시 실행 등록을 해제했습니다."
+                    : "다른 NetAuth 경로에 등록된 시작 작업은 유지했습니다.");
             }
         }
-        catch (Exception error) when (IsStartupError(error))
+        catch (Exception error) when (PClientPreviewStartup.IsOperationError(error))
         {
             RefreshAutomaticLogin();
             ShowFeedback("Windows 시작 작업을 변경할 수 없습니다. 작업 스케줄러 상태를 확인하세요.", isError: true);
         }
     }
-
-    private static bool IsStartupError(Exception error) =>
-        error is COMException or UnauthorizedAccessException or InvalidOperationException;
 
     private void ShowEditor()
     {
@@ -148,12 +157,26 @@ public partial class AccountWindow : Window
         DeleteConfirmation.Visibility = Visibility.Collapsed;
         CancelEditor.Content = registeredId is null ? "나중에" : "취소";
         AccountId.Text = registeredId ?? string.Empty;
+        PClientExecutablePath.Text = registeredExecutablePath ?? string.Empty;
         AccountPassword.Clear();
         ShowFeedback(string.Empty);
         (registeredId is null ? (UIElement)AccountId : AccountPassword).Focus();
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e) => ShowEditor();
+
+    private void BrowseExecutable_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "설치한 PClient 실행 파일 선택",
+            Filter = "PClient 실행 파일 (PClientUI.exe)|PClientUI.exe"
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            PClientExecutablePath.Text = dialog.FileName;
+        }
+    }
 
     private void Minimize_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
 
@@ -195,9 +218,25 @@ public partial class AccountWindow : Window
             return;
         }
 
+        PClientExecutableIdentity? executableIdentity = null;
+        if (mode == AccountWindowMode.PClient && !string.IsNullOrWhiteSpace(PClientExecutablePath.Text))
+        {
+            try
+            {
+                executableIdentity = PClientExecutableIdentity.FromFile(PClientExecutablePath.Text.Trim());
+            }
+            catch (Exception error) when (IsStorageError(error) || error is ArgumentException or NotSupportedException)
+            {
+                ShowFeedback("설치한 PClientUI.exe의 전체 경로와 파일 읽기 권한을 확인하세요.", isError: true);
+                PClientExecutablePath.Focus();
+                return;
+            }
+        }
+
         try
         {
-            store.Save(new LoginAccount(userId, password));
+            store.Save(new LoginAccount(userId, password, executableIdentity));
+            registeredExecutablePath = executableIdentity?.Path;
             VerificationState.Text = "확인 전";
             ShowOverview(userId);
             ShowFeedback("계정을 이 PC에 저장했습니다.");
@@ -225,31 +264,33 @@ public partial class AccountWindow : Window
 
     private void ConfirmDelete_Click(object sender, RoutedEventArgs e)
     {
+        var startupRemoved = true;
         if (mode == AccountWindowMode.PClientPreview)
         {
             try
             {
-                PClientPreviewStartup.Disable();
-                RefreshAutomaticLogin();
+                startupRemoved = PClientPreviewStartup.Disable();
             }
-            catch (Exception error) when (IsStartupError(error))
+            catch (Exception error) when (PClientPreviewStartup.IsOperationError(error))
             {
-                RefreshAutomaticLogin();
-                ShowFeedback("계정을 삭제하려면 Windows 시작 작업을 먼저 해제해야 합니다.", isError: true);
-                return;
+                startupRemoved = false;
             }
         }
 
         try
         {
             store.Delete();
+            registeredExecutablePath = null;
             VerificationState.Text = "확인 전";
             ShowOverview(null);
             RegisterButton.Focus();
-            ShowFeedback("저장된 계정을 삭제했습니다.");
+            ShowFeedback(startupRemoved ? "저장된 계정을 삭제했습니다."
+                : "저장된 계정은 삭제했습니다. Windows 시작 작업의 중지·해제 여부는 작업 스케줄러에서 확인하세요.",
+                isError: !startupRemoved);
         }
         catch (Exception error) when (IsStorageError(error))
         {
+            RefreshAutomaticLogin();
             ShowFeedback("계정을 삭제할 수 없습니다. 폴더 권한을 확인하고 다시 시도하세요.", isError: true);
         }
     }
@@ -328,6 +369,8 @@ public partial class AccountWindow : Window
                 PClientAccountFillResult.Filled => "PClient에 ID와 비밀번호를 채웠습니다.",
                 PClientAccountFillResult.WindowNotFound => "이 Windows 세션에서 PClient 로그인 창을 열어 주세요.",
                 PClientAccountFillResult.AmbiguousWindow => "PClient 창을 하나만 남기고 다시 시도하세요.",
+                PClientAccountFillResult.ExecutableNotRegistered => "계정 변경에서 설치한 PClientUI.exe를 지정해 주세요.",
+                PClientAccountFillResult.ExecutableNotConfirmed => "실행 중인 PClient가 등록한 파일과 일치하지 않습니다. 설치 위치와 버전을 확인하세요.",
                 PClientAccountFillResult.LogoutNotConfirmed => "PClient에서 로그아웃 상태를 확인할 수 없습니다.",
                 PClientAccountFillResult.FieldsNotConfirmed => "PClient 로그인 입력란을 확인할 수 없습니다.",
                 PClientAccountFillResult.PasswordNotEmpty => "PClient의 비밀번호란을 비운 뒤 다시 시도하세요.",
@@ -357,5 +400,6 @@ public partial class AccountWindow : Window
     }
 
     private static bool IsStorageError(Exception error) =>
-        error is IOException or UnauthorizedAccessException or CryptographicException or JsonException;
+        error is IOException or UnauthorizedAccessException or CryptographicException or JsonException or InvalidDataException;
+
 }

@@ -101,6 +101,19 @@
                         <PasswordBox x:Name="AccountPassword" Style="{StaticResource Field}" MaxLength="1024"
                                      AutomationProperties.AutomationId="PClientAccountPassword"
                                      AutomationProperties.Name="PClient 비밀번호" />
+                        <StackPanel x:Name="ExecutableRegistration" Margin="0,13,0,0">
+                            <Label Content="PClient 실행 파일" Target="{Binding ElementName=PClientExecutablePath}"
+                                   Padding="0,0,0,6" FontWeight="SemiBold" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="찾아보기" Style="{StaticResource Action}"
+                                        Margin="8,0,0,0" Click="BrowseExecutable_Click" />
+                                <TextBox x:Name="PClientExecutablePath" Style="{StaticResource Field}"
+                                         AutomationProperties.AutomationId="PClientExecutablePath"
+                                         AutomationProperties.Name="PClient 실행 파일 경로" />
+                            </DockPanel>
+                            <TextBlock Text="설치한 PClientUI.exe를 지정하세요. 파일이 업데이트되면 다시 확인해 주세요."
+                                       Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
                             <Button Content="계정 저장" Style="{StaticResource PrimaryAction}"
                                     IsDefault="True" Click="Save_Click" AutomationProperties.AutomationId="SaveAccount" />

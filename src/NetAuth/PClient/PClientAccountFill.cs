@@ -10,6 +10,8 @@ internal enum PClientAccountFillResult
     Filled,
     WindowNotFound,
     AmbiguousWindow,
+    ExecutableNotRegistered,
+    ExecutableNotConfirmed,
     LogoutNotConfirmed,
     FieldsNotConfirmed,
     PasswordNotEmpty,
@@ -26,7 +28,9 @@ internal enum PClientAccountFillResult
 
 internal static class PClientAccountFill
 {
-    public static PClientAccountFillResult Fill(LoginAccount account) => Run(account, submitPreview: false);
+    public static PClientAccountFillResult Fill(LoginAccount account) => account.ExecutableIdentity is null
+        ? PClientAccountFillResult.ExecutableNotRegistered
+        : Run(account, submitPreview: false);
 
     public static PClientAccountFillResult LoginPreview(LoginAccount account) => Run(account, submitPreview: true);
 
@@ -65,6 +69,8 @@ internal static class PClientAccountFill
             return candidates.Length switch
             {
                 0 => PClientAccountFillResult.WindowNotFound,
+                1 when !submitPreview && account.ExecutableIdentity?.Matches(candidates[0]) != true =>
+                    PClientAccountFillResult.ExecutableNotConfirmed,
                 1 => RunInLoggedOutWindow(candidates[0].Id, account, submitPreview),
                 _ => PClientAccountFillResult.AmbiguousWindow
             };
@@ -181,7 +187,7 @@ internal static class PClientAccountFill
             }
         }
 
-        if (result != PClientAccountFillResult.Filled && idChanged && !idField.RestoreId(originalId, selection))
+        if (result != PClientAccountFillResult.Filled && idChanged && !idField.RestoreId(originalId, selection, account.UserId))
         {
             return PClientAccountFillResult.RestorationNotVerified;
         }

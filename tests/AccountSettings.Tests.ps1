@@ -166,10 +166,27 @@ try {
     if ($submissions -notmatch '\d+' -or $Matches[0] -ne '1') { throw 'Settings triggered an unexpected login.' }
     Click-Button 'CloseWindow'
     if (-not $app.WaitForExit(3000)) { throw 'Custom close button did not close the window.' }
+    Close-App $app
+    $app = $null
+
+    Add-Type -AssemblyName System.Security
+    $data = [Text.Encoding]::UTF8.GetBytes('{}')
+    $scope = [Text.Encoding]::UTF8.GetBytes('NetAuth.Dummy.v1')
+    $invalidRecord = [Security.Cryptography.ProtectedData]::Protect($data, $scope,
+        [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    [IO.File]::WriteAllBytes($accountPath, $invalidRecord)
+    $app = Open-App $netAuth '--settings-dummy'
+    $settings = Get-Window $app
+    Wait-For {
+        (Find-Control $settings 'AccountFeedback').Current.Name -like '저장된 계정을 읽을 수 없습니다.*'
+    } 'Malformed account reported without closing settings'
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($accountPath)) -ne [Convert]::ToBase64String($invalidRecord)) {
+        throw 'Opening settings changed the malformed account file.'
+    }
 } finally {
     Close-App $app
     Close-App $client
     if (Test-Path -LiteralPath $accountPath) { Remove-Item -LiteralPath $accountPath }
 }
 
-Write-Output 'Account settings lifecycle, saved dummy login and custom caption buttons passed.'
+Write-Output 'Account settings lifecycle, saved dummy login, custom caption buttons and malformed storage handling passed.'
