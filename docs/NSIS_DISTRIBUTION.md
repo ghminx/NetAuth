@@ -15,6 +15,7 @@ Windows x64와 저장소의 `global.json`에 맞는 .NET SDK가 필요함. 저�
 ## 설치 및 배포 전 검증
 
 - 현재 사용자 권한으로 `%LOCALAPPDATA%\Programs\NetAuth`에 설치함. 앱, 시작 메뉴, 설치된 앱 목록, 설치·제거 마법사에서 `src/NetAuth/Assets/netauth.ico`의 NA 아이콘을 사용함.
+- 빌드 시 `src/NetAuth/Assets/netauth.png`에서 마법사 시작·완료 화면의 브랜드 이미지와 진행 화면 헤더를 생성함. 안내 문구는 Windows 표시 언어에 따라 한국어 또는 영어로 표시됨.
 - 업데이트나 제거 전 NetAuth를 종료함. Windows **설정 → 앱 → 설치된 앱**에서 제거할 수 있음. 제거 시 별도로 보관된 계정은 유지되며 앱의 계정 관리 화면에서 삭제할 수 있음.
 - 연구실 PC에서 Smart App Control을 켠 상태로 설치, 시작 메뉴 실행, 버전 갱신 및 제거를 확인함. 무서명 설치본의 실행 여부는 배포본과 대상 PC에서 확인이 필요함. PClient 연동 검증은 [개발 진행표](DEVELOPMENT_TRACKER.md)의 실환경 단계에 따름.
 

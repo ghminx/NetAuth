@@ -11,7 +11,9 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot 'src/NetAuth/NetAuth.csproj'
 $installer = Join-Path $repoRoot 'packaging/nsis/NetAuth.nsi'
+$artwork = Join-Path $repoRoot 'packaging/nsis/New-InstallerArtwork.ps1'
 $icon = Join-Path $repoRoot 'src/NetAuth/Assets/netauth.ico'
+$logo = Join-Path $repoRoot 'src/NetAuth/Assets/netauth.png'
 $localDotnet = Join-Path $repoRoot '.dotnet/dotnet.exe'
 $dotnet = if (Test-Path -LiteralPath $localDotnet) { $localDotnet } else { (Get-Command dotnet.exe).Source }
 $compiler = if ($MakeNsisPath) { (Resolve-Path -LiteralPath $MakeNsisPath).ProviderPath }
@@ -73,9 +75,13 @@ try {
         $metadata.FileBuildPart, $metadata.FilePrivatePart
     $name = "NetAuth-Setup-$displayVersion-win-x64.exe"
     $stagedSetup = Join-Path $stage $name
+    & $artwork -LogoPath $logo -OutputDirectory $stage
+    $wizardBitmap = Join-Path $stage 'wizard.bmp'
+    $headerBitmap = Join-Path $stage 'header.bmp'
 
     & $compiler /V3 /WX /INPUTCHARSET UTF8 "/DAPP_EXE=$app" "/DAPP_ICON=$icon" "/DSETUP_EXE=$stagedSetup" `
-        "/DAPP_VERSION=$displayVersion" "/DAPP_FILE_VERSION=$fileVersion" $installer
+        "/DAPP_VERSION=$displayVersion" "/DAPP_FILE_VERSION=$fileVersion" `
+        "/DAPP_WIZARD_BITMAP=$wizardBitmap" "/DAPP_HEADER_BITMAP=$headerBitmap" $installer
     if ($LASTEXITCODE -ne 0) { throw "MakeNSIS failed ($LASTEXITCODE)." }
 
     $setup = Join-Path $output $name

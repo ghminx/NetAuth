@@ -5,14 +5,28 @@ InstallDir "$LOCALAPPDATA\Programs\NetAuth"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 BrandingText "NetAuth"
+SetFont "Malgun Gothic" 9
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\NetAuth"
 !define MUI_ICON "${APP_ICON}"
 !define MUI_UNICON "${APP_ICON}"
+!define MUI_BGCOLOR FCFDFE
+!define MUI_TEXTCOLOR 152B46
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${APP_WIZARD_BITMAP}"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_HEADERIMAGE_BITMAP "${APP_HEADER_BITMAP}"
+!define MUI_HEADERIMAGE_BITMAP_STRETCH AspectFitHeight
 !include "MUI2.nsh"
 
+!define MUI_WELCOMEPAGE_TITLE "$(NetAuthWelcomeTitle)"
+!define MUI_WELCOMEPAGE_TEXT "$(NetAuthWelcomeText)"
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_HEADER_TEXT "$(NetAuthInstallTitle)"
+!define MUI_PAGE_HEADER_SUBTEXT "$(NetAuthInstallText)"
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_TITLE "$(NetAuthFinishTitle)"
+!define MUI_FINISHPAGE_TEXT "$(NetAuthFinishText)"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -26,6 +40,19 @@ VIAddVersionKey /LANG=0 "CompanyName" "NetAuth"
 VIAddVersionKey /LANG=0 "LegalCopyright" ""
 VIAddVersionKey /LANG=0 "FileVersion" "${APP_FILE_VERSION}"
 VIAddVersionKey /LANG=0 "ProductVersion" "${APP_VERSION}"
+
+LangString NetAuthWelcomeTitle ${LANG_ENGLISH} "Set up PClient access"
+LangString NetAuthWelcomeTitle ${LANG_KOREAN} "PClient 로그인 준비"
+LangString NetAuthWelcomeText ${LANG_ENGLISH} "Save your account in NetAuth to fill in the PClient sign-in fields.$\r$\n$\r$\nNetAuth installs for your Windows account. After setup, open it from the Start menu."
+LangString NetAuthWelcomeText ${LANG_KOREAN} "PClient 계정을 등록해 로그인 입력란을 채울 수 있습니다.$\r$\n$\r$\n현재 Windows 사용자에게 설치됩니다.$\r$\n설치 후 시작 메뉴에서 NetAuth를 열 수 있습니다."
+LangString NetAuthInstallTitle ${LANG_ENGLISH} "Installing NetAuth"
+LangString NetAuthInstallTitle ${LANG_KOREAN} "NetAuth 설치 중"
+LangString NetAuthInstallText ${LANG_ENGLISH} "Setting up the app and its Start menu shortcut."
+LangString NetAuthInstallText ${LANG_KOREAN} "앱 파일과 시작 메뉴 바로가기를 준비하고 있습니다."
+LangString NetAuthFinishTitle ${LANG_ENGLISH} "NetAuth is ready"
+LangString NetAuthFinishTitle ${LANG_KOREAN} "NetAuth 설치 완료"
+LangString NetAuthFinishText ${LANG_ENGLISH} "Open NetAuth from the Start menu to manage your PClient account."
+LangString NetAuthFinishText ${LANG_KOREAN} "시작 메뉴에서 NetAuth를 열어 계정을 관리하세요."
 
 LangString InstallFailed ${LANG_ENGLISH} "NetAuth could not be installed. Close NetAuth and retry."
 LangString InstallFailed ${LANG_KOREAN} "NetAuth를 설치하지 못했습니다. NetAuth를 종료한 뒤 다시 시도해 주세요."
