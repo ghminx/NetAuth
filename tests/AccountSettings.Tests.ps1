@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+. (Join-Path $PSScriptRoot 'UiTestHelpers.ps1')
 
 $netAuth = Join-Path $PSScriptRoot '../src/NetAuth/bin/Debug/net10.0-windows/NetAuth.exe'
 $dummy = Join-Path $PSScriptRoot 'NetAuth.DummyClient/bin/Debug/net10.0-windows/NetAuth.DummyClient.exe'
@@ -7,42 +7,9 @@ $accountPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 
 $valuePattern = [System.Windows.Automation.ValuePattern]::Pattern
 $invokePattern = [System.Windows.Automation.InvokePattern]::Pattern
 
-function Wait-For($Condition, $Context) {
-    $elapsed = [System.Diagnostics.Stopwatch]::StartNew()
-    do {
-        if (& $Condition) { return }
-        Start-Sleep -Milliseconds 80
-    } while ($elapsed.Elapsed.TotalSeconds -lt 8)
-    throw "Timed out: $Context"
-}
-
-function Open-App($Path, $Arguments) {
-    $launch = [System.Diagnostics.ProcessStartInfo]::new($Path, $Arguments)
-    $launch.UseShellExecute = $false
-    $launch.CreateNoWindow = $true
-    [System.Diagnostics.Process]::Start($launch)
-}
-
-function Close-App($Process) {
-    if ($null -eq $Process) { return }
-    if (-not $Process.HasExited) {
-        if (-not $Process.CloseMainWindow() -or -not $Process.WaitForExit(3000)) {
-            $Process.Kill()
-            $Process.WaitForExit()
-        }
-    }
-    $Process.Dispose()
-}
-
 function Get-Window($Process) {
     Wait-For { $Process.Refresh(); $Process.MainWindowHandle -ne [IntPtr]::Zero } 'App window'
     [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
-}
-
-function Find-Control($Window, $Id) {
-    $condition = [System.Windows.Automation.PropertyCondition]::new(
-        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
-    $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
 function Is-Visible($Window, $Id) {
@@ -83,6 +50,12 @@ try {
     $app = Open-App $netAuth '--settings-dummy'
     $settings = Get-Window $app
     Wait-For { Is-Visible $settings 'SaveAccount' } 'First-run account editor'
+    $productDescription = Find-Control $settings 'ProductDescription'
+    if ($null -eq $productDescription -or $productDescription.Current.IsOffscreen -or
+        ($productDescription.Current.Name -replace '\s+', ' ').Trim() -ne
+            '창원대 네트워크 접근제어 PClient 로그인 정보 자동 입력 프로그램') {
+        throw 'The sidebar does not describe the purpose of NetAuth.'
+    }
     Assert-CleanLabels $settings
     $windowPattern = $settings.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
     Click-Button 'MaximizeOrRestoreWindow'
@@ -180,8 +153,22 @@ try {
     Wait-For {
         (Find-Control $settings 'AccountFeedback').Current.Name -like '저장된 계정을 읽을 수 없습니다.*'
     } 'Malformed account reported without closing settings'
+
+    $launch = [Diagnostics.ProcessStartInfo]::new($netAuth, '--login-pclient-preview-at-logon')
+    $launch.UseShellExecute = $false
+    $launch.CreateNoWindow = $true
+    $launch.RedirectStandardError = $true
+    $worker = [Diagnostics.Process]::Start($launch)
+    try {
+        if (-not $worker.WaitForExit(5000) -or $worker.ExitCode -ne 6 -or
+            $worker.StandardError.ReadToEnd().Trim() -ne 'AccountStoreUnavailable') {
+            throw 'The logon worker did not report the malformed account.'
+        }
+    } finally {
+        Close-App $worker
+    }
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($accountPath)) -ne [Convert]::ToBase64String($invalidRecord)) {
-        throw 'Opening settings changed the malformed account file.'
+        throw 'Opening settings or starting the logon worker changed the malformed account file.'
     }
 } finally {
     Close-App $app

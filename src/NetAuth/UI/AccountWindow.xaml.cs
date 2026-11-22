@@ -1,7 +1,6 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation.Peers;
 using System.Windows.Media;
@@ -22,8 +21,7 @@ public partial class AccountWindow : Window
 {
     private readonly CredentialStore store;
     private readonly AccountWindowMode mode;
-    private string? registeredId;
-    private string? registeredExecutablePath;
+    private (string UserId, string? ExecutablePath)? registeredAccount;
     private bool refreshingAutomaticLogin;
 
     internal AccountWindow(AccountWindowMode mode)
@@ -46,15 +44,14 @@ public partial class AccountWindow : Window
         try
         {
             var account = store.Load();
-            registeredExecutablePath = account?.ExecutableIdentity?.Path;
-            ShowOverview(account?.UserId);
-            if (registeredId is null)
+            ShowOverview(account is null ? null : (account.UserId, account.ExecutableIdentity?.Path));
+            if (account is null)
             {
                 ShowEditor();
                 Loaded += (_, _) => AccountId.Focus();
             }
         }
-        catch (Exception error) when (IsStorageError(error))
+        catch (Exception error) when (CredentialStore.IsStorageError(error))
         {
             ShowOverview(null);
             RegisterButton.IsEnabled = false;
@@ -63,10 +60,10 @@ public partial class AccountWindow : Window
         }
     }
 
-    private void ShowOverview(string? userId)
+    private void ShowOverview((string UserId, string? ExecutablePath)? account)
     {
-        registeredId = userId;
-        var hasAccount = userId is not null;
+        registeredAccount = account;
+        var hasAccount = account.HasValue;
         Heading.Text = hasAccount ? "계정 관리" : "계정 설정";
         Description.Text = hasAccount
             ? "PClient 비밀번호가 바뀌면 저장된 계정을 업데이트하세요."
@@ -75,7 +72,7 @@ public partial class AccountWindow : Window
         RegisterButton.Visibility = hasAccount ? Visibility.Collapsed : Visibility.Visible;
         SavedActions.Visibility = hasAccount ? Visibility.Visible : Visibility.Collapsed;
         DeleteConfirmation.Visibility = Visibility.Collapsed;
-        SavedAccountId.Text = userId ?? string.Empty;
+        SavedAccountId.Text = account?.UserId ?? string.Empty;
         AccountId.Clear();
         AccountPassword.Clear();
         RefreshAutomaticLogin();
@@ -87,7 +84,7 @@ public partial class AccountWindow : Window
         AutoLoginAtLogon.IsEnabled = false;
         try
         {
-            if (mode != AccountWindowMode.PClientPreview || registeredId is null)
+            if (mode != AccountWindowMode.PClientPreview || registeredAccount is null)
             {
                 AutoLoginAtLogon.IsChecked = false;
                 AutoLoginDescription.Text = "실제 PClient의 로그인 결과를 확인한 뒤 사용할 수 있습니다.";
@@ -114,37 +111,40 @@ public partial class AccountWindow : Window
 
     private void AutoLoginAtLogon_Changed(object sender, RoutedEventArgs e)
     {
-        if (refreshingAutomaticLogin || mode != AccountWindowMode.PClientPreview || registeredId is null)
+        if (refreshingAutomaticLogin || mode != AccountWindowMode.PClientPreview || registeredAccount is null)
         {
             return;
         }
 
+        string feedback;
+        var isError = false;
         try
         {
             if (AutoLoginAtLogon.IsChecked == true)
             {
                 PClientPreviewStartup.Enable();
-                RefreshAutomaticLogin();
-                ShowFeedback("Windows 로그인 시 자동으로 실행되도록 등록했습니다.");
+                feedback = "Windows 로그인 시 자동으로 실행되도록 등록했습니다.";
             }
             else
             {
-                var removed = PClientPreviewStartup.Disable();
-                RefreshAutomaticLogin();
-                ShowFeedback(removed ? "Windows 로그인 시 실행 등록을 해제했습니다."
-                    : "다른 NetAuth 경로에 등록된 시작 작업은 유지했습니다.");
+                feedback = PClientPreviewStartup.Disable() ? "Windows 로그인 시 실행 등록을 해제했습니다."
+                    : "다른 NetAuth 경로에 등록된 시작 작업은 유지했습니다.";
             }
         }
         catch (Exception error) when (PClientPreviewStartup.IsOperationError(error))
         {
-            RefreshAutomaticLogin();
-            ShowFeedback("Windows 시작 작업을 변경할 수 없습니다. 작업 스케줄러 상태를 확인하세요.", isError: true);
+            feedback = "Windows 시작 작업을 변경할 수 없습니다. 작업 스케줄러 상태를 확인하세요.";
+            isError = true;
         }
+
+        RefreshAutomaticLogin();
+        ShowFeedback(feedback, isError);
     }
 
     private void ShowEditor()
     {
-        Heading.Text = registeredId is null ? "계정 등록" : "계정 변경";
+        var firstRegistration = registeredAccount is null;
+        Heading.Text = firstRegistration ? "계정 등록" : "계정 변경";
         Description.Text = mode switch
         {
             AccountWindowMode.PClient => "창원대 PClient에 사용하는 ID와 비밀번호를 입력하세요.",
@@ -155,12 +155,12 @@ public partial class AccountWindow : Window
         RegisterButton.Visibility = Visibility.Collapsed;
         SavedActions.Visibility = Visibility.Collapsed;
         DeleteConfirmation.Visibility = Visibility.Collapsed;
-        CancelEditor.Content = registeredId is null ? "나중에" : "취소";
-        AccountId.Text = registeredId ?? string.Empty;
-        PClientExecutablePath.Text = registeredExecutablePath ?? string.Empty;
+        CancelEditor.Content = firstRegistration ? "나중에" : "취소";
+        AccountId.Text = registeredAccount?.UserId ?? string.Empty;
+        PClientExecutablePath.Text = registeredAccount?.ExecutablePath ?? string.Empty;
         AccountPassword.Clear();
         ShowFeedback(string.Empty);
-        (registeredId is null ? (UIElement)AccountId : AccountPassword).Focus();
+        (firstRegistration ? (UIElement)AccountId : AccountPassword).Focus();
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e) => ShowEditor();
@@ -196,7 +196,7 @@ public partial class AccountWindow : Window
 
     private void CancelEdit_Click(object sender, RoutedEventArgs e)
     {
-        ShowOverview(registeredId);
+        ShowOverview(registeredAccount);
         ShowFeedback("입력을 취소했습니다.");
     }
 
@@ -225,7 +225,8 @@ public partial class AccountWindow : Window
             {
                 executableIdentity = PClientExecutableIdentity.FromFile(PClientExecutablePath.Text.Trim());
             }
-            catch (Exception error) when (IsStorageError(error) || error is ArgumentException or NotSupportedException)
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or
+                InvalidDataException or ArgumentException or NotSupportedException)
             {
                 ShowFeedback("설치한 PClientUI.exe의 전체 경로와 파일 읽기 권한을 확인하세요.", isError: true);
                 PClientExecutablePath.Focus();
@@ -236,12 +237,11 @@ public partial class AccountWindow : Window
         try
         {
             store.Save(new LoginAccount(userId, password, executableIdentity));
-            registeredExecutablePath = executableIdentity?.Path;
             VerificationState.Text = "확인 전";
-            ShowOverview(userId);
+            ShowOverview((userId, executableIdentity?.Path));
             ShowFeedback("계정을 이 PC에 저장했습니다.");
         }
-        catch (Exception error) when (IsStorageError(error))
+        catch (Exception error) when (CredentialStore.IsStorageError(error))
         {
             AccountPassword.Clear();
             AccountPassword.Focus();
@@ -280,7 +280,6 @@ public partial class AccountWindow : Window
         try
         {
             store.Delete();
-            registeredExecutablePath = null;
             VerificationState.Text = "확인 전";
             ShowOverview(null);
             RegisterButton.Focus();
@@ -288,7 +287,7 @@ public partial class AccountWindow : Window
                 : "저장된 계정은 삭제했습니다. Windows 시작 작업의 중지·해제 여부는 작업 스케줄러에서 확인하세요.",
                 isError: !startupRemoved);
         }
-        catch (Exception error) when (IsStorageError(error))
+        catch (Exception error) when (CredentialStore.IsStorageError(error))
         {
             RefreshAutomaticLogin();
             ShowFeedback("계정을 삭제할 수 없습니다. 폴더 권한을 확인하고 다시 시도하세요.", isError: true);
@@ -337,7 +336,7 @@ public partial class AccountWindow : Window
                 _ => "로그인 결과를 확인할 수 없습니다."
             }, isError: state is not ("Authenticated" or "AlreadyAuthenticated"));
         }
-        catch (Exception error) when (IsStorageError(error) || error is InvalidOperationException or COMException)
+        catch (Exception error) when (CredentialStore.IsStorageError(error) || error is InvalidOperationException or COMException)
         {
             VerificationState.Text = "미확인";
             ShowFeedback("로그인 확인 중 오류가 발생했습니다. 계정 설정과 대상 창을 확인하세요.", isError: true);
@@ -380,7 +379,7 @@ public partial class AccountWindow : Window
                 _ => "PClient에서 저장된 ID가 입력됐는지 확인할 수 없습니다."
             }, isError: result != PClientAccountFillResult.Filled);
         }
-        catch (Exception error) when (IsStorageError(error) || error is InvalidOperationException or COMException)
+        catch (Exception error) when (CredentialStore.IsStorageError(error) || error is InvalidOperationException or COMException)
         {
             ShowFeedback("PClient에 계정을 채울 수 없습니다. 저장된 계정과 PClient 창을 확인하세요.", isError: true);
         }
@@ -398,8 +397,4 @@ public partial class AccountWindow : Window
         FeedbackPanel.Visibility = message.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         FrameworkElementAutomationPeer.CreatePeerForElement(Feedback)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
-
-    private static bool IsStorageError(Exception error) =>
-        error is IOException or UnauthorizedAccessException or CryptographicException or JsonException or InvalidDataException;
-
 }

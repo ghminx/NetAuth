@@ -59,6 +59,8 @@ LangString InstallFailed ${LANG_ENGLISH} "NetAuth could not be installed. Close 
 LangString InstallFailed ${LANG_KOREAN} "NetAuth를 설치하지 못했습니다. NetAuth를 종료한 뒤 다시 시도해 주세요."
 LangString UninstallFailed ${LANG_ENGLISH} "NetAuth could not be removed. Close NetAuth and retry."
 LangString UninstallFailed ${LANG_KOREAN} "NetAuth를 제거하지 못했습니다. NetAuth를 종료한 뒤 다시 시도해 주세요."
+LangString InstallCleanupPending ${LANG_ENGLISH} "NetAuth is installed, but previous files could not be removed. Close any app using them and run setup again."
+LangString InstallCleanupPending ${LANG_KOREAN} "NetAuth는 설치되어 있지만 이전 파일을 정리하지 못했습니다. 파일을 사용 중인 프로그램을 종료한 뒤 설치를 다시 실행해 주세요."
 LangString SetupBusy ${LANG_ENGLISH} "Another NetAuth setup operation is already running."
 LangString SetupBusy ${LANG_KOREAN} "NetAuth 설치 또는 제거가 진행 중입니다. 완료된 뒤 다시 시도해 주세요."
 
@@ -84,6 +86,25 @@ Var ShortcutReplaced
         System::Call 'kernel32::MoveFileExW(w "${PATH}.netauth-backup", w "${PATH}", i 1) i .r0'
     ${ElseIf} ${REPLACED} == 1
         Delete "${PATH}"
+    ${EndIf}
+!macroend
+
+!macro IfBackupExists TARGET
+    IfFileExists "$INSTDIR\NetAuth.exe.netauth-backup" ${TARGET}
+    IfFileExists "$INSTDIR\Uninstall.exe.netauth-backup" ${TARGET}
+    IfFileExists "$SMPROGRAMS\NetAuth.lnk.netauth-backup" ${TARGET}
+!macroend
+
+!macro RemoveCommittedBackups FAILURE
+    ReadRegDWORD $0 HKCU "${UNINSTALL_KEY}" "BackupsCommitted"
+    ${If} $0 == 1
+        ClearErrors
+        Delete "$INSTDIR\NetAuth.exe.netauth-backup"
+        Delete "$INSTDIR\Uninstall.exe.netauth-backup"
+        Delete "$SMPROGRAMS\NetAuth.lnk.netauth-backup"
+        IfErrors ${FAILURE}
+        DeleteRegValue HKCU "${UNINSTALL_KEY}" "BackupsCommitted"
+        IfErrors ${FAILURE}
     ${EndIf}
 !macroend
 
@@ -127,9 +148,10 @@ Section "NetAuth"
     ${AndIf} $PreviousInstall != "$INSTDIR"
         Goto install_report_failure
     ${EndIf}
-    IfFileExists "$INSTDIR\NetAuth.exe.netauth-backup" install_report_failure
-    IfFileExists "$INSTDIR\Uninstall.exe.netauth-backup" install_report_failure
-    IfFileExists "$SMPROGRAMS\NetAuth.lnk.netauth-backup" install_report_failure
+    ${If} $PreviousInstall == "$INSTDIR"
+        !insertmacro RemoveCommittedBackups install_cleanup_pending
+    ${EndIf}
+    !insertmacro IfBackupExists install_report_failure
 
     ClearErrors
     SetOutPath "$INSTDIR"
@@ -153,10 +175,18 @@ Section "NetAuth"
         WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${APP_VERSION}"
     ${EndIf}
     IfErrors install_failed
-    Delete "$INSTDIR\NetAuth.exe.netauth-backup"
-    Delete "$INSTDIR\Uninstall.exe.netauth-backup"
-    Delete "$SMPROGRAMS\NetAuth.lnk.netauth-backup"
+    !insertmacro IfBackupExists install_mark_committed
     Goto install_done
+install_mark_committed:
+    ; 설치와 버전 등록이 모두 완료된 뒤에만 다음 실행에서 백업 삭제 허용
+    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "BackupsCommitted" 1
+    IfErrors install_cleanup_pending
+    !insertmacro RemoveCommittedBackups install_cleanup_pending
+    Goto install_done
+install_cleanup_pending:
+    MessageBox MB_OK|MB_ICONSTOP "$(InstallCleanupPending)" /SD IDOK
+    SetErrorLevel 1
+    Abort
 
 install_failed:
     ${If} $PreviousInstall == ""
@@ -185,6 +215,10 @@ Section "Uninstall"
         Goto uninstall_report_failure
     ${EndIf}
     ReadRegStr $PreviousVersion HKCU "${UNINSTALL_KEY}" "DisplayVersion"
+    ${If} $PreviousInstall == "$INSTDIR"
+        !insertmacro RemoveCommittedBackups uninstall_report_failure
+    ${EndIf}
+    !insertmacro IfBackupExists uninstall_report_failure
 
     ClearErrors
     ${If} ${FileExists} "$SMPROGRAMS\NetAuth.lnk"

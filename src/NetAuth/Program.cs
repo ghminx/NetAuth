@@ -1,6 +1,3 @@
-using System.IO;
-using System.Security.Cryptography;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Automation;
 using NetAuth.PClient;
@@ -66,8 +63,7 @@ internal static class Program
         {
             account = new CredentialStore(useDummyAccount: true).Load();
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or
-            CryptographicException or JsonException or InvalidDataException)
+        catch (Exception error) when (CredentialStore.IsStorageError(error))
         {
             Console.Error.WriteLine("AccountStoreUnavailable");
             return 6;

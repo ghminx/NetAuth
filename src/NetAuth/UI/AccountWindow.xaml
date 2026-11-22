@@ -78,9 +78,11 @@
                     <TextBlock Text="PClient 계정" FontSize="17" FontWeight="Bold"
                                Foreground="{StaticResource Brand}" Margin="0,15,0,0" />
                     <TextBlock Foreground="{StaticResource Muted}" FontSize="13" LineHeight="21"
-                               TextWrapping="Wrap" Margin="0,8,0,0">
-                        <Run Text="Windows 사용자별 저장" /><LineBreak />
-                        <Run Text="계정 정보 암호화" />
+                               TextWrapping="Wrap" Margin="0,8,0,0"
+                               AutomationProperties.AutomationId="ProductDescription">
+                        <Run Text="창원대 네트워크 접근제어" /><LineBreak />
+                        <Run Text="PClient 로그인 정보" /><LineBreak />
+                        <Run Text="자동 입력 프로그램" />
                     </TextBlock>
                 </StackPanel>
             </Border>

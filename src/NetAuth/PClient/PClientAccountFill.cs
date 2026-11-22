@@ -91,29 +91,29 @@ internal static class PClientAccountFill
     private static PClientAccountFillResult RunInLoggedOutWindow(int processId, LoginAccount account, bool submitPreview)
     {
         var processCondition = new PropertyCondition(AutomationElement.ProcessIdProperty, processId);
-        var logoutCondition = new AndCondition(
-            processCondition,
-            new PropertyCondition(AutomationElement.AutomationIdProperty, "1013"),
-            new PropertyCondition(AutomationElement.IsOffscreenProperty, false),
-            new OrCondition(
-                new PropertyCondition(AutomationElement.NameProperty, "로그아웃 상태입니다."),
-                new PropertyCondition(AutomationElement.NameProperty, "로그아웃 상태입니다")));
-
         var windows = AutomationElement.RootElement.FindAll(TreeScope.Children, processCondition);
         if (windows.Count == 0)
         {
             return PClientAccountFillResult.WindowNotFound;
         }
 
-        var loggedOut = windows.Cast<AutomationElement>()
-            .Where(window => window.FindFirst(TreeScope.Descendants, logoutCondition) is not null)
+        var candidates = windows.Cast<AutomationElement>()
+            .Select(window => (Window: window, State: PClientWindowStatus.Read(window, processId)))
+            .ToArray();
+        if (candidates.Any(candidate => candidate.State == PClientWindowState.Ambiguous))
+        {
+            return PClientAccountFillResult.LogoutNotConfirmed;
+        }
+
+        var loggedOut = candidates
+            .Where(candidate => candidate.State == PClientWindowState.LoggedOut)
             .ToArray();
         if (submitPreview && windows.Count == 1 && loggedOut.Length == 0)
         {
-            return PClientPreviewLogin.ReadStatus(windows[0], processId) switch
+            return candidates[0].State switch
             {
-                "인증되었습니다." => PClientAccountFillResult.AlreadyAuthenticated,
-                null => PClientAccountFillResult.WindowNotFound,
+                PClientWindowState.Authenticated => PClientAccountFillResult.AlreadyAuthenticated,
+                PClientWindowState.Missing => PClientAccountFillResult.WindowNotFound,
                 _ => PClientAccountFillResult.LogoutNotConfirmed
             };
         }
@@ -124,7 +124,7 @@ internal static class PClientAccountFill
                 : PClientAccountFillResult.AmbiguousWindow;
         }
 
-        var target = loggedOut[0];
+        var target = loggedOut[0].Window;
         var button = IntPtr.Zero;
         if (submitPreview)
         {
@@ -135,14 +135,13 @@ internal static class PClientAccountFill
             }
         }
 
-        var fill = FillFields(target, processId, logoutCondition, account);
+        var fill = FillFields(target, processId, account);
         return submitPreview && fill == PClientAccountFillResult.Filled
-            ? PClientPreviewLogin.Submit(target, processId, button, logoutCondition)
+            ? PClientPreviewLogin.Submit(target, processId, button)
             : fill;
     }
 
-    private static PClientAccountFillResult FillFields(AutomationElement target, int processId,
-        Condition logoutCondition, LoginAccount account)
+    private static PClientAccountFillResult FillFields(AutomationElement target, int processId, LoginAccount account)
     {
         var handle = new IntPtr(target.Current.NativeWindowHandle);
         var idField = PClientNativeEdit.Find(handle, processId, 1024, masked: false);
@@ -155,11 +154,6 @@ internal static class PClientAccountFill
         {
             return PClientAccountFillResult.PasswordNotEmpty;
         }
-        if (target.FindFirst(TreeScope.Descendants, logoutCondition) is null)
-        {
-            return PClientAccountFillResult.LogoutNotConfirmed;
-        }
-
         var original = idField.ReadIdState();
         if (original is null || !idField.CanAccept(account.UserId, masked: false))
         {
@@ -169,6 +163,10 @@ internal static class PClientAccountFill
         {
             return PClientAccountFillResult.PasswordNotAccepted;
         }
+        if (PClientWindowStatus.Read(target, processId) != PClientWindowState.LoggedOut)
+        {
+            return PClientAccountFillResult.LogoutNotConfirmed;
+        }
 
         var (originalId, selection) = original.Value;
         var idChanged = originalId != account.UserId;
@@ -177,7 +175,7 @@ internal static class PClientAccountFill
         {
             try
             {
-                result = target.FindFirst(TreeScope.Descendants, logoutCondition) is null
+                result = PClientWindowStatus.Read(target, processId) != PClientWindowState.LoggedOut
                     ? PClientAccountFillResult.LogoutNotConfirmed
                     : passwordField.FillEmptyPassword(account.Password);
             }

@@ -377,19 +377,23 @@ public static class NetAuthEditDiagnostic
         string differentId = new string('0', target.Length);
         if (differentId == target)
             differentId = new string('1', target.Length);
+
+        string expected = original;
         try
         {
-            result.EmptyIdMatched = WriteAndVerifyId(root, process, window, string.Empty) &&
-                WriteAndVerifyId(root, process, window, target);
-            result.PrefilledIdMatched = WriteAndVerifyId(root, process, window, differentId) &&
-                WriteAndVerifyId(root, process, window, target);
+            result.EmptyIdMatched = WriteAndVerifyId(root, process, window, ref expected, string.Empty) &&
+                WriteAndVerifyId(root, process, window, ref expected, target);
+            result.PrefilledIdMatched = result.EmptyIdMatched &&
+                WriteAndVerifyId(root, process, window, ref expected, differentId) &&
+                WriteAndVerifyId(root, process, window, ref expected, target);
         }
         finally
         {
-            result.OriginalIdRestored = WriteAndVerifyId(root, process, window, original);
+            result.OriginalIdRestored = WriteAndVerifyId(root, process, window, ref expected, original);
             if (result.OriginalIdRestored == true)
                 result.OriginalSelectionRestored = SetSelection(window,
-                    originalSelection & 0xFFFF, (int)((uint)originalSelection >> 16));
+                    originalSelection & 0xFFFF, (int)((uint)originalSelection >> 16)) &&
+                    ReadEditText(window) == original;
         }
 
         if (result.OriginalIdRestored != true || result.OriginalSelectionRestored != true)
@@ -407,18 +411,25 @@ public static class NetAuthEditDiagnostic
             (GetStyle(window) & PasswordOrReadOnly) == 0 && GetMaskCharacter(window) == 0;
     }
 
-    private static bool WriteAndVerifyId(IntPtr root, uint process, IntPtr window, string text)
+    private static bool WriteAndVerifyId(IntPtr root, uint process, IntPtr window, ref string expected, string text)
     {
-        if (!IsWritableId(root, process, window))
+        if (!MatchesWritableId(root, process, window, expected))
             return false;
-        string previous = ReadEditText(window);
-        if (previous == null)
-            return false;
-        if (previous == text)
+        if (expected == text)
             return true;
 
-        return SetSelection(window, 0, previous.Length) && ReplaceSelection(window, text) &&
-            IsWritableId(root, process, window) && ReadEditText(window) == text;
+        // 선택 범위를 지정하는 동안 변경된 입력도 보존
+        if (!SetSelection(window, 0, expected.Length) || !MatchesWritableId(root, process, window, expected) ||
+            !ReplaceSelection(window, text) || !MatchesWritableId(root, process, window, text))
+            return false;
+
+        expected = text;
+        return true;
+    }
+
+    private static bool MatchesWritableId(IntPtr root, uint process, IntPtr window, string expected)
+    {
+        return IsWritableId(root, process, window) && ReadEditText(window) == expected;
     }
 
     private static string ReadEditText(IntPtr window)

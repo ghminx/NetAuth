@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+. (Join-Path $PSScriptRoot 'UiTestHelpers.ps1')
 
 $dummyExe = Join-Path $PSScriptRoot 'NetAuth.DummyClient/bin/Debug/net10.0-windows/NetAuth.DummyClient.exe'
 $netAuthExe = Join-Path $PSScriptRoot '../src/NetAuth/bin/Debug/net10.0-windows/NetAuth.exe'
@@ -9,12 +9,6 @@ function Assert-Equal($Actual, $Expected, $Context) {
     if ($Actual -cne $Expected) {
         throw "${Context}: expected '$Expected', got '$Actual'."
     }
-}
-
-function Find-Control($Window, $Id) {
-    $condition = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $Id)
-    $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
 }
 
 function Read-State {

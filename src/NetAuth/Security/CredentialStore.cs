@@ -22,6 +22,9 @@ internal sealed class CredentialStore(bool useDummyAccount)
 
     private string AccountPath => Path.Combine(directory, "account.dat");
 
+    public static bool IsStorageError(Exception error) =>
+        error is IOException or UnauthorizedAccessException or CryptographicException or JsonException or InvalidDataException;
+
     public LoginAccount? Load()
     {
         byte[] encrypted;
@@ -29,11 +32,7 @@ internal sealed class CredentialStore(bool useDummyAccount)
         {
             encrypted = File.ReadAllBytes(AccountPath);
         }
-        catch (FileNotFoundException)
-        {
-            return null;
-        }
-        catch (DirectoryNotFoundException)
+        catch (IOException error) when (error is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
         }

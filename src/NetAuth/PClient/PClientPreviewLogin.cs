@@ -22,22 +22,11 @@ internal static class PClientPreviewLogin
         return candidates.Count == 1 ? new IntPtr(candidates[0].Current.NativeWindowHandle) : IntPtr.Zero;
     }
 
-    public static string? ReadStatus(AutomationElement window, int processId)
-    {
-        var statuses = window.FindAll(TreeScope.Descendants, new AndCondition(
-            new PropertyCondition(AutomationElement.ProcessIdProperty, processId),
-            new PropertyCondition(AutomationElement.AutomationIdProperty, "1013"),
-            new PropertyCondition(AutomationElement.IsOffscreenProperty, false)));
-
-        return statuses.Count == 1 ? statuses[0].Current.Name : null;
-    }
-
-    public static PClientAccountFillResult Submit(AutomationElement window, int processId,
-        IntPtr button, Condition logoutCondition)
+    public static PClientAccountFillResult Submit(AutomationElement window, int processId, IntPtr button)
     {
         try
         {
-            if (window.FindFirst(TreeScope.Descendants, logoutCondition) is null ||
+            if (PClientWindowStatus.Read(window, processId) != PClientWindowState.LoggedOut ||
                 FindButton(window, processId) != button)
             {
                 return PClientAccountFillResult.LoginButtonNotConfirmed;
@@ -49,11 +38,11 @@ internal static class PClientPreviewLogin
             var clock = Stopwatch.StartNew();
             while (clock.Elapsed < TimeSpan.FromSeconds(8))
             {
-                switch (ReadStatus(window, processId))
+                switch (PClientWindowStatus.Read(window, processId))
                 {
-                    case "인증되었습니다.":
+                    case PClientWindowState.Authenticated:
                         return PClientAccountFillResult.Authenticated;
-                    case "테스트 자격 증명이 거부되었습니다.":
+                    case PClientWindowState.CredentialsRejected:
                         return PClientAccountFillResult.CredentialsRejected;
                 }
                 Thread.Sleep(100);

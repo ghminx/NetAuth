@@ -63,9 +63,17 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             SelectRange(selection & 0xFFFF, (int)((uint)selection >> 16));
     }
 
-    public bool ReplaceAndVerifyId(string previous, string value) =>
-        ReadIdText() == previous && Replace(0, previous.Length, value, masked: false) &&
-        ReadIdText() == value;
+    public bool ReplaceAndVerifyId(string previous, string value)
+    {
+        if (ReadIdText() != previous || !IsWritable(masked: false) ||
+            !SelectRange(0, previous.Length) || !IsWritable(masked: false))
+        {
+            return false;
+        }
+
+        return SendReplacement(handle, ReplaceSelection, IntPtr.Zero, value,
+            AbortIfHung, TimeoutMilliseconds, out _) != IntPtr.Zero && ReadIdText() == value;
+    }
 
     public PClientAccountFillResult FillEmptyPassword(string password)
     {
@@ -99,13 +107,6 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
         // 원문을 읽지 않으므로 실패 후 남은 문자의 소유권을 확인할 수 없어 입력란 보존
         return writtenLength == 0 ? PClientAccountFillResult.PasswordNotAccepted : PClientAccountFillResult.RestorationNotVerified;
     }
-
-    private bool Replace(int start, int end, string value, bool masked) =>
-        IsWritable(masked) &&
-        SelectRange(start, end) &&
-        IsWritable(masked) &&
-        SendReplacement(handle, ReplaceSelection, IntPtr.Zero, value,
-            AbortIfHung, TimeoutMilliseconds, out _) != IntPtr.Zero;
 
     private bool SelectRange(int start, int end) =>
         IsExpectedEdit() &&
