@@ -34,6 +34,7 @@ Page custom ShowInstallOptions SaveInstallOptions
 !define MUI_FINISHPAGE_TITLE "$(NetAuthFinishTitle)"
 !define MUI_FINISHPAGE_TEXT "$(NetAuthFinishText)"
 !insertmacro MUI_PAGE_FINISH
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "$(RemoveAccountNotice)"
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
@@ -74,6 +75,10 @@ LangString InstallFailed ${LANG_ENGLISH} "NetAuth could not be installed. Close 
 LangString InstallFailed ${LANG_KOREAN} "NetAuth를 설치하지 못했습니다. NetAuth를 종료한 뒤 다시 시도해 주세요."
 LangString UninstallFailed ${LANG_ENGLISH} "NetAuth could not be removed. Close NetAuth and retry."
 LangString UninstallFailed ${LANG_KOREAN} "NetAuth를 제거하지 못했습니다. NetAuth를 종료한 뒤 다시 시도해 주세요."
+LangString RemoveAccountNotice ${LANG_ENGLISH} "Uninstalling NetAuth also deletes the saved PClient account for this Windows user."
+LangString RemoveAccountNotice ${LANG_KOREAN} "NetAuth를 제거하면 이 Windows 사용자에게 저장된 PClient 계정도 삭제됩니다."
+LangString RemoveAccountFailed ${LANG_ENGLISH} "The saved PClient account could not be deleted. Close any app using it and run removal again."
+LangString RemoveAccountFailed ${LANG_KOREAN} "저장된 PClient 계정을 삭제하지 못했습니다. 계정 파일을 사용 중인 프로그램을 종료한 뒤 제거를 다시 실행해 주세요."
 LangString InstallCleanupPending ${LANG_ENGLISH} "NetAuth is installed, but previous files could not be removed. Close any app using them and run setup again."
 LangString InstallCleanupPending ${LANG_KOREAN} "NetAuth는 설치되어 있지만 이전 파일을 정리하지 못했습니다. 파일을 사용 중인 프로그램을 종료한 뒤 설치를 다시 실행해 주세요."
 LangString SetupBusy ${LANG_ENGLISH} "Another NetAuth setup operation is already running."
@@ -356,6 +361,15 @@ Section "Uninstall"
         ClearErrors
         DeleteRegValue HKCU "${RUN_KEY}" "NetAuth"
         IfErrors uninstall_failed
+    ${EndIf}
+    ${If} ${FileExists} "$LOCALAPPDATA\NetAuth\Account\account.dat"
+        ClearErrors
+        Delete "$LOCALAPPDATA\NetAuth\Account\account.dat"
+        ${If} ${Errors}
+            MessageBox MB_OK|MB_ICONSTOP "$(RemoveAccountFailed)" /SD IDOK
+            SetErrorLevel 1
+            Abort
+        ${EndIf}
     ${EndIf}
     ClearErrors
     ${If} $PreviousInstall != ""

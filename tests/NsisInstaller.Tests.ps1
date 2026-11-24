@@ -11,6 +11,20 @@ using System.Runtime.InteropServices;
 
 public static class SetupTestButton
 {
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern int GetDlgCtrlID(IntPtr window);
+
+    public static void ClickAsync(int handle)
+    {
+        var button = new IntPtr(handle);
+        if (handle == 0 || !PostMessage(GetParent(button), 0x0111, new IntPtr(GetDlgCtrlID(button)), button))
+            throw new InvalidOperationException("Could not post setup button click.");
+    }
+
     public static int Send(int handle, uint message)
     {
         IntPtr value;
@@ -37,16 +51,17 @@ $removingDesktopShortcut = Join-Path (Split-Path -Parent $desktopShortcut) 'NetA
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $taskName = "NetAuth PClient Preview Logon - $sid"
+$accountPath = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'NetAuth/Account/account.dat'
 
 function Get-TestTask {
     Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
 }
 
-if ((Get-TestTask) -or
+if ((Test-Path -LiteralPath $accountPath) -or (Get-TestTask) -or
     (Get-ItemProperty -LiteralPath $runKey -Name NetAuth -ErrorAction SilentlyContinue) -or
     (@($key, $shortcut, $pendingShortcut, $removingShortcut, $desktopShortcut, $removingDesktopShortcut, "$shortcut.netauth-backup" |
         Where-Object { Test-Path -LiteralPath $_ }).Count -ne 0)) {
-    throw 'Use a Windows profile with no NetAuth installation, shortcuts or preview task.'
+    throw 'Use a Windows profile with no NetAuth installation, saved account, shortcuts or preview task.'
 }
 
 $artifacts = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../artifacts')).Path
@@ -58,6 +73,7 @@ $uninstaller = Join-Path $installDirectory 'Uninstall.exe'
 $uninstallerBackup = "$uninstaller.netauth-backup"
 $backups = @("$app.netauth-backup", "$uninstaller.netauth-backup", "$shortcut.netauth-backup")
 $originalUninstallerAcl = $null
+$accountHash = $null
 
 function Invoke-Setup($Path, $Arguments, $ExpectedExit, $Context) {
     $process = Start-Process -FilePath $Path -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
@@ -140,8 +156,13 @@ function Assert-Options([bool]$Selected, [bool]$AutomaticLogin = $false) {
 }
 
 try {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $accountPath) -Force | Out-Null
+    [IO.File]::WriteAllText($accountPath, 'installer-test-account-placeholder')
+    $accountHash = (Get-FileHash -LiteralPath $accountPath).Hash
     Invoke-Setup $previousInstaller "/S /D=$installDirectory" 0 'Previous install'
     $previous = Get-Installation
+    $autoLoginCommand = '"' + $app + '" --start-in-tray --auto-login'
+    Set-ItemProperty -LiteralPath $runKey -Name NetAuth -Value $autoLoginCommand
     foreach ($file in $app, $uninstaller) {
         $lock = [IO.File]::Open($file, 'Open', 'Read', 'Read')
         try {
@@ -181,16 +202,24 @@ try {
     $originalUninstallerAcl = $null
 
     Invoke-Setup $installer "/S /D=$installDirectory" 0 'Update retry after releasing the backup'
+    if ((Get-ItemProperty -LiteralPath $runKey -Name NetAuth).NetAuth -ne $autoLoginCommand -or
+        (Get-FileHash -LiteralPath $accountPath).Hash -ne $accountHash) {
+        throw 'Updating from the previous version changed automatic login or the saved account.'
+    }
+    Remove-ItemProperty -LiteralPath $runKey -Name NetAuth
     Assert-Options $false
     Invoke-OptionsSetup $false $true
     Assert-Options $true
-    Set-ItemProperty -LiteralPath $runKey -Name NetAuth -Value ('"' + $app + '" --start-in-tray --auto-login')
+    Set-ItemProperty -LiteralPath $runKey -Name NetAuth -Value $autoLoginCommand
     Invoke-OptionsSetup $true $true
     Assert-Options $true $true
+    if ((Get-FileHash -LiteralPath $accountPath).Hash -ne $accountHash) {
+        throw 'Update changed the saved account file.'
+    }
     Invoke-OptionsSetup $true $false
     Assert-Options $false
     Invoke-OptionsSetup $false $true
-    Set-ItemProperty -LiteralPath $runKey -Name NetAuth -Value ('"' + $app + '" --start-in-tray --auto-login')
+    Set-ItemProperty -LiteralPath $runKey -Name NetAuth -Value $autoLoginCommand
     Assert-Options $true $true
     $ready = Get-Installation
     foreach ($file in $backups) {
@@ -208,14 +237,57 @@ try {
         throw 'Blocked removal changed the installation or preview task.'
     }
     Assert-Options $true $true
-    Invoke-Removal 0 'Removal retry after releasing the shortcut'
+    if ((Get-FileHash -LiteralPath $accountPath).Hash -ne $accountHash) {
+        throw 'Removal blocked before account cleanup changed the account file.'
+    }
+    $accountLock = [IO.File]::Open($accountPath, 'Open', 'Read', 'Read')
+    try {
+        Invoke-Removal 1 'Removal with a locked account file'
+    } finally {
+        $accountLock.Dispose()
+    }
+    if (-not (Test-Path -LiteralPath $uninstaller) -or -not (Test-Path -LiteralPath $key) -or
+        (Get-FileHash -LiteralPath $accountPath).Hash -ne $accountHash) {
+        throw 'Removal must remain retryable when account deletion fails.'
+    }
+    Invoke-Removal 0 'Removal retry after releasing the account file'
+    if (Test-Path -LiteralPath $accountPath) {
+        throw 'Silent removal left the saved account file.'
+    }
     Assert-Options $false
     if ((Get-TestTask) -or
         (@($key, $app, $uninstaller, $shortcut, $pendingShortcut, $removingShortcut |
             Where-Object { Test-Path -LiteralPath $_ }).Count -ne 0)) {
         throw 'The installer left app files, shortcuts, registration or a preview task after removal.'
     }
-    Write-Output 'Passed interactive install options, prior selection, shortcut target, update recovery and removal retry.'
+    Invoke-Setup $installer "/S /D=$installDirectory" 0 'Reinstall after deleting saved account'
+    if (Test-Path -LiteralPath $accountPath) {
+        throw 'Reinstall unexpectedly restored the deleted account.'
+    }
+    [IO.File]::WriteAllText($accountPath, 'installer-test-account-placeholder')
+    Copy-Item -LiteralPath $uninstaller -Destination $uninstallerCopy -Force
+    $remove = Open-App $uninstallerCopy ('_?=' + $installDirectory)
+    try {
+        Wait-For { $remove.Refresh(); $remove.MainWindowHandle -ne [IntPtr]::Zero } 'Uninstall wizard'
+        $wizard = [System.Windows.Automation.AutomationElement]::FromHandle($remove.MainWindowHandle)
+        $forward = '^(Uninstall|제거)(\s|[<>()]|$)'
+        Wait-For { $null -ne (Find-WizardControl $wizard $forward) } 'Uninstall confirm'
+        $notice = $wizard.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition) |
+            Where-Object { $_.Current.Name -match 'also deletes the saved PClient account|저장된 PClient 계정도 삭제됩니다' }
+        if (-not $notice) { throw 'Uninstall confirmation did not disclose saved account deletion.' }
+        [SetupTestButton]::ClickAsync((Find-WizardControl $wizard $forward).Current.NativeWindowHandle)
+        Wait-For { -not (Test-Path -LiteralPath $accountPath) } 'Interactive removal deletes saved account'
+        $finish = '^(Close|Finish|닫기|닫음|마침|완료)(\s|[()]|$)'
+        Wait-For { $remove.HasExited -or $null -ne (Find-WizardControl $wizard $finish) } 'Uninstall finish'
+        if (-not $remove.HasExited) {
+            [SetupTestButton]::ClickAsync((Find-WizardControl $wizard $finish).Current.NativeWindowHandle)
+        }
+        if (-not $remove.WaitForExit(5000) -or $remove.ExitCode -ne 0) { throw 'Interactive removal did not complete.' }
+    } finally {
+        Close-App $remove
+    }
+    Write-Output 'Passed update recovery and preservation of startup and account settings on update, plus account deletion on uninstall.'
 } catch {
     Write-Warning "Installer test failed: $($_.Exception.Message)"
     throw
@@ -240,4 +312,8 @@ try {
         }
     }
     if (Test-Path -LiteralPath $uninstallerCopy) { Remove-Item -LiteralPath $uninstallerCopy }
+    if ($null -ne $accountHash -and (Test-Path -LiteralPath $accountPath) -and
+        (Get-FileHash -LiteralPath $accountPath).Hash -eq $accountHash) {
+        Remove-Item -LiteralPath $accountPath
+    }
 }

@@ -228,7 +228,7 @@ Start-ScheduledTask -TaskPath '\' -TaskName "NetAuth PClient Preview Logon - $si
 
 ### 설치 PC 테스트
 
-- 최신 검증용 설치본은 `artifacts/nsis/NetAuth-Setup-1.0.1-preview.17-win-x64.exe`임. 설치 옵션에서 현재 사용자의 Windows 시작 등록과 바탕 화면 바로가기를 개별 선택함. 창을 닫으면 트레이에 유지되며, 설치 경로가 같은 NetAuth를 다시 열면 기존 창을 표시함.
+- v0.0.9 설치본은 `artifacts/nsis/NetAuth-Setup-0.0.9-win-x64.exe`임. 기존 설치 위에 업데이트할 때 계정과 시작 옵션을 보존함. 제거하면 현재 Windows 사용자의 저장 계정과 시작 항목을 삭제함. 창을 닫으면 트레이에 유지되며, 설치 경로가 같은 NetAuth를 다시 열면 기존 창을 표시함.
 - 설치 마법사의 Windows 시작 옵션만 선택하면 트레이에서 시작함. NetAuth에서 **자동 로그인**을 켜면 Windows 시작 등록과 PClient 자동 로그인이 함께 설정됨. 실제 PC 재부팅 검증은 대기 상태임(TC-03·TC-08 관련).
 
 ### 초기 실행 파일 배포 기록
