@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Automation;
 using NetAuth.PClient;
@@ -8,17 +9,36 @@ namespace NetAuth;
 
 internal static class Program
 {
+    private const int StandardOutputHandle = -11;
+    private const uint ParentProcess = uint.MaxValue;
+
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args is [] or ["--start-in-tray"] or ["--start-in-tray", "--auto-login"])
+        {
+            return AccountTray.Run(startHidden: args.Length != 0);
+        }
+
+        var mode = args switch
+        {
+            ["--settings-dummy"] => AccountWindowMode.Dummy,
+            ["--settings-pclient-preview"] => AccountWindowMode.PClientPreview,
+            _ => (AccountWindowMode?)null
+        };
+        if (mode is { } settingsMode)
+        {
+            return OpenSettings(settingsMode);
+        }
+
+        var output = GetStdHandle(StandardOutputHandle);
+        if (output == IntPtr.Zero || output == new IntPtr(-1))
+        {
+            AttachConsole(ParentProcess);
+        }
+
         switch (args)
         {
-            case []:
-                return OpenSettings(AccountWindowMode.PClient);
-            case ["--settings-dummy"]:
-                return OpenSettings(AccountWindowMode.Dummy);
-            case ["--settings-pclient-preview"]:
-                return OpenSettings(AccountWindowMode.PClientPreview);
             case ["--login-pclient-preview-at-logon"]:
                 return RunLogonPreview();
             case ["--remove-pclient-preview-startup"]:
@@ -34,13 +54,19 @@ internal static class Program
                 return 0;
             default:
                 Console.Error.WriteLine(
-                    "사용법: NetAuth [--settings-dummy | --settings-pclient-preview | --login-pclient-preview-at-logon | " +
+                    "사용법: NetAuth [--start-in-tray [--auto-login] | --settings-dummy | --settings-pclient-preview | --login-pclient-preview-at-logon | " +
                     "--remove-pclient-preview-startup | --probe-dummy | --login-dummy | --check-ui-automation]");
                 return 2;
         }
     }
 
     private static int OpenSettings(AccountWindowMode mode) => new Application().Run(new AccountWindow(mode));
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetStdHandle(int standardHandle);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(uint processId);
 
     private static int RemovePreviewStartup()
     {

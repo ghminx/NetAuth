@@ -20,23 +20,14 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
 
     public static PClientNativeEdit? Find(IntPtr root, int processId, int controlId, bool masked)
     {
-        if (root == IntPtr.Zero || GetWindowThreadProcessId(root, out var owner) == 0 || owner != processId)
+        var handle = PClientNativeWindow.FindUniqueChild(root, processId, controlId, "Edit");
+        if (handle == IntPtr.Zero)
         {
             return null;
         }
 
-        var matches = new List<PClientNativeEdit>();
-        EnumChildWindows(root, (child, _) =>
-        {
-            var edit = new PClientNativeEdit(root, processId, controlId, child);
-            if (edit.IsExpectedEdit())
-            {
-                matches.Add(edit);
-            }
-            return true;
-        }, IntPtr.Zero);
-
-        return matches.Count == 1 && matches[0].IsMasked() == masked ? matches[0] : null;
+        var edit = new PClientNativeEdit(root, processId, controlId, handle);
+        return edit.IsMasked() == masked ? edit : null;
     }
 
     public int? ReadLength() => IsExpectedEdit() ? ReadNumber(GetTextLength) : null;
@@ -130,7 +121,7 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
     }
 
     private bool IsWritable(bool masked) =>
-        IsExpectedEdit() && IsWindowEnabled(handle) &&
+        IsExpectedEdit() && PClientNativeWindow.IsWindowEnabled(handle) &&
         (GetWindowLong(handle, WindowStyleIndex) & ReadOnlyStyle) == 0 && IsMasked() == masked;
 
     private bool? IsMasked() =>
@@ -138,39 +129,12 @@ internal sealed class PClientNativeEdit(IntPtr root, int processId, int controlI
             ? true
             : ReadNumber(GetPasswordCharacter) is int character ? character != 0 : null;
 
-    private bool IsExpectedEdit()
-    {
-        if (GetDlgCtrlID(handle) != controlId || !IsChild(root, handle) || !IsWindowVisible(handle) ||
-            GetWindowThreadProcessId(handle, out var owner) == 0 || owner != processId)
-        {
-            return false;
-        }
-
-        var name = new StringBuilder(64);
-        return GetClassName(handle, name, name.Capacity) > 0 &&
-            name.ToString().Equals("Edit", StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsExpectedEdit() => PClientNativeWindow.IsExpectedChild(root, handle, processId, controlId, "Edit");
 
     private int? ReadNumber(uint message) =>
         SendNumber(handle, message, IntPtr.Zero, IntPtr.Zero, AbortIfHung,
             TimeoutMilliseconds, out var value) != IntPtr.Zero ? unchecked((int)value.ToInt64()) : null;
 
-    private delegate bool WindowCallback(IntPtr window, IntPtr data);
-
-    [DllImport("user32.dll")]
-    private static extern bool EnumChildWindows(IntPtr parent, WindowCallback callback, IntPtr data);
-    [DllImport("user32.dll")]
-    private static extern bool IsChild(IntPtr parent, IntPtr child);
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowVisible(IntPtr window);
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowEnabled(IntPtr window);
-    [DllImport("user32.dll")]
-    private static extern int GetDlgCtrlID(IntPtr window);
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
-    [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
     private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")]

@@ -6,13 +6,14 @@ param(
     [switch]$CheckInput,
     [switch]$CheckAutoInput,
     [switch]$PreviewInput,
-    [switch]$CheckIdReplacement
+    [switch]$CheckIdReplacement,
+    [switch]$CheckLoginButton
 )
 
 $ErrorActionPreference = 'Stop'
 $isAutomaticCheck = $CheckAutoInput -or $PreviewInput -or $CheckIdReplacement
-if (@($CheckInput, $CheckAutoInput, $PreviewInput, $CheckIdReplacement | Where-Object { $_ }).Count -gt 1) {
-    throw '-CheckInput, -CheckAutoInput, -PreviewInput, -CheckIdReplacement 중 하나만 선택하세요.'
+if (@($CheckInput, $CheckAutoInput, $PreviewInput, $CheckIdReplacement, $CheckLoginButton | Where-Object { $_ }).Count -gt 1) {
+    throw '입력 검증과 -CheckLoginButton 중 하나만 선택하세요.'
 }
 
 function New-NameCondition($Names) {
@@ -234,12 +235,7 @@ function Test-IdReplacement($Window, $Root, $TargetId, $PasswordHandle, $StatusC
     }
 }
 
-function Test-LoginEdits($Window, $TargetId, $StatusCondition) {
-    $root = [IntPtr]$Window.Current.NativeWindowHandle
-    if ($root -eq [IntPtr]::Zero) {
-        return [pscustomobject]@{ Reason = 'NativeWindowNotFound'; Fields = @() }
-    }
-
+function Initialize-NativeDiagnostic {
     if (-not ('NetAuthEditDiagnostic' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -274,6 +270,16 @@ public static class NetAuthEditDiagnostic
         public bool? OriginalIdRestored { get; set; }
         public bool? OriginalSelectionRestored { get; set; }
         public string Reason { get; set; }
+    }
+
+    public sealed class LoginButtonCandidate
+    {
+        public int ControlId { get; set; }
+        public string ClassName { get; set; }
+        public bool OwnedByTarget { get; set; }
+        public bool Visible { get; set; }
+        public bool Enabled { get; set; }
+        public string CaptionCheck { get; set; }
     }
 
     private delegate bool WindowCallback(IntPtr window, IntPtr data);
@@ -328,6 +334,54 @@ public static class NetAuthEditDiagnostic
             return true;
         }, IntPtr.Zero);
         return edits.ToArray();
+    }
+
+    public static bool IsOwnedBy(IntPtr window, uint process)
+    {
+        uint owner;
+        return GetWindowThreadProcessId(window, out owner) != 0 && owner == process;
+    }
+
+    public static LoginButtonCandidate[] ReadButtonCandidates(IntPtr root, uint process)
+    {
+        var candidates = new List<LoginButtonCandidate>();
+        if (!IsOwnedBy(root, process))
+            return candidates.ToArray();
+
+        EnumChildWindows(root, delegate(IntPtr window, IntPtr data)
+        {
+            var controlId = GetDlgCtrlID(window);
+            var className = new StringBuilder(64);
+            GetClassName(window, className, className.Capacity);
+            var isButton = className.ToString().Equals("Button", StringComparison.OrdinalIgnoreCase);
+            if (controlId != 1029 && !isButton)
+                return true;
+
+            var owned = IsOwnedBy(window, process);
+            var visible = IsWindowVisible(window) && IsChild(root, window);
+            var captionCheck = "NotRead";
+            if (isButton && owned && visible)
+            {
+                // 버튼 문구는 비교 결과만 반환하고 원문은 공유 출력에서 제외
+                var caption = new StringBuilder(32);
+                IntPtr ignored;
+                var received = ReadTextMessageTimeout(window, GetTextMessage, new IntPtr(caption.Capacity),
+                    caption, AbortIfHung, 250, out ignored);
+                var text = caption.ToString().Trim();
+                captionCheck = received == IntPtr.Zero ? "ReadFailed" : text.Length == 0 ? "Empty"
+                    : text == "로그인" || text == "&로그인" ? "MatchesLogin" : "Different";
+            }
+            candidates.Add(new LoginButtonCandidate {
+                ControlId = controlId,
+                ClassName = className.ToString(),
+                OwnedByTarget = owned,
+                Visible = visible,
+                Enabled = IsEnabled(window),
+                CaptionCheck = captionCheck
+            });
+            return true;
+        }, IntPtr.Zero);
+        return candidates.ToArray();
     }
 
     public static int GetStyle(IntPtr window) { return GetWindowLong(window, StyleIndex); }
@@ -549,7 +603,15 @@ public static class NetAuthEditDiagnostic
 }
 '@
     }
+}
 
+function Test-LoginEdits($Window, $TargetId, $StatusCondition) {
+    $root = [IntPtr]$Window.Current.NativeWindowHandle
+    if ($root -eq [IntPtr]::Zero) {
+        return [pscustomobject]@{ Reason = 'NativeWindowNotFound'; Fields = @() }
+    }
+
+    Initialize-NativeDiagnostic
     if ($isAutomaticCheck) {
         $passwordEdits = @([NetAuthEditDiagnostic]::FindEdits($root, $TargetId, 1022))
         if ($passwordEdits.Count -ne 1) {
@@ -588,6 +650,52 @@ public static class NetAuthEditDiagnostic
     [pscustomobject]@{ Reason = 'Checked'; Fields = $fields }
 }
 
+function Read-LoginButtonCheck($Window, $TargetId, $LoginLabelCondition) {
+    Initialize-NativeDiagnostic
+    $root = [IntPtr]$Window.Current.NativeWindowHandle
+    $check = [ordered]@{
+        Reason = 'NativeWindowNotFound'
+        NativeCandidates = @()
+        AutomationCandidates = @()
+    }
+    $element = [System.Windows.Automation.AutomationElement]
+    $buttonCondition = [System.Windows.Automation.OrCondition]::new($LoginLabelCondition,
+        [System.Windows.Automation.PropertyCondition]::new($element::AutomationIdProperty, '1029'))
+    $check.AutomationCandidates = @(
+        foreach ($button in $Window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCondition)) {
+            $info = $button.Current
+            if ($info.ProcessId -eq $TargetId -and -not $info.IsPassword -and $info.ClassName -notmatch 'Edit' -and
+                $info.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
+                [pscustomobject][ordered]@{
+                    AutomationId = if ($info.AutomationId -match '^\d+$') { $info.AutomationId } else { $null }
+                    ClassName = $info.ClassName
+                    ControlType = $info.ControlType.ProgrammaticName
+                    HasNativeHandle = $info.NativeWindowHandle -ne 0
+                    IsEnabled = $info.IsEnabled
+                    IsOffscreen = $info.IsOffscreen
+                    LabelMatchesLogin = $info.Name -eq '로그인'
+                }
+            }
+        }
+    )
+    if ($root -ne [IntPtr]::Zero) {
+        if ([NetAuthEditDiagnostic]::IsOwnedBy($root, $TargetId)) {
+            $check.NativeCandidates = @([NetAuthEditDiagnostic]::ReadButtonCandidates($root, $TargetId))
+            $expected = @($check.NativeCandidates | Where-Object {
+                $_.ControlId -eq 1029 -and $_.ClassName -eq 'Button' -and $_.OwnedByTarget -and $_.Visible
+            })
+            $check.Reason = if ($expected.Count -eq 0) { 'NativeButtonNotFound' }
+                elseif ($expected.Count -gt 1) { 'MultipleNativeButtons' }
+                elseif ($expected[0].CaptionCheck -ne 'MatchesLogin') { 'NativeCaption' + $expected[0].CaptionCheck }
+                elseif (-not $expected[0].Enabled) { 'NativeButtonDisabled' }
+                else { 'NativeButtonReady' }
+        } else {
+            $check.Reason = 'NativeWindowOwnerMismatch'
+        }
+    }
+    [pscustomobject]$check
+}
+
 function Get-Inspection($TargetId, $HasExplicitProcess) {
     $result = [ordered]@{
         ProcessId = $null
@@ -604,6 +712,9 @@ function Get-Inspection($TargetId, $HasExplicitProcess) {
     }
     if ($CheckInput -or $isAutomaticCheck) {
         $result.InputCheck = [pscustomobject]@{ Reason = 'LogoutStateNotConfirmed'; Fields = @() }
+    }
+    if ($CheckLoginButton) {
+        $result.LoginButtonCheck = [pscustomobject]@{ Reason = 'LogoutStateNotConfirmed'; NativeCandidates = @(); AutomationCandidates = @() }
     }
 
     $sessionId = (Get-Process -Id $PID).SessionId
@@ -672,7 +783,9 @@ function Get-Inspection($TargetId, $HasExplicitProcess) {
                     }
                 }
 
-                Get-ControlCandidates $window $windowIndex $TargetId $loginLabelCondition
+                if (-not $CheckLoginButton) {
+                    Get-ControlCandidates $window $windowIndex $TargetId $loginLabelCondition
+                }
             } catch [System.Windows.Automation.ElementNotAvailableException] {
                 $result.ScanInterrupted = $true
                 if ($result.State -eq 'UnknownState') {
@@ -681,7 +794,14 @@ function Get-Inspection($TargetId, $HasExplicitProcess) {
             }
         }
     )
-    if ($isAutomaticCheck -and $result.State -eq 'LoginRequired' -and $result.AutomationId -ne '1013') {
+    if ($CheckLoginButton -and $result.State -eq 'LoginRequired') {
+        try {
+            $result.LoginButtonCheck = Read-LoginButtonCheck ($windows[$result.StatusWindowIndex - 1]) $TargetId $loginLabelCondition
+        } catch [System.Windows.Automation.ElementNotAvailableException], [System.Runtime.InteropServices.COMException] {
+            $result.ScanInterrupted = $true
+            $result.LoginButtonCheck.Reason = 'WindowChanged'
+        }
+    } elseif ($isAutomaticCheck -and $result.State -eq 'LoginRequired' -and $result.AutomationId -ne '1013') {
         $result.InputCheck = [pscustomobject]@{ Reason = 'LogoutControlIdNotConfirmed'; Fields = @() }
     } elseif (($CheckInput -or $isAutomaticCheck) -and $result.State -eq 'LoginRequired') {
         $result.InputCheck = Test-LoginEdits ($windows[$result.StatusWindowIndex - 1]) $TargetId $statusCondition

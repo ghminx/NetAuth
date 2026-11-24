@@ -9,16 +9,44 @@ internal sealed record PClientExecutableIdentity(string Path, string Sha256)
 {
     public const string FileName = "PClientUI.exe";
 
-    public static PClientExecutableIdentity FromFile(string path)
+    public static PClientExecutableIdentity? FromSignedFile(string path)
     {
-        if (!System.IO.Path.IsPathFullyQualified(path) ||
-            !string.Equals(System.IO.Path.GetFileName(path), FileName, StringComparison.OrdinalIgnoreCase))
+        // 서명 확인과 해시 계산 사이의 파일 교체 방지
+        using var image = File.OpenRead(path);
+        var powerShellDirectory = System.IO.Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0");
+        var start = new ProcessStartInfo(System.IO.Path.Combine(powerShellDirectory, "powershell.exe"))
         {
-            throw new InvalidDataException("PClientUI.exe의 전체 경로가 필요합니다.");
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = powerShellDirectory
+        };
+        start.Environment["PSModulePath"] = System.IO.Path.Combine(powerShellDirectory, "Modules");
+        start.Environment["NETAUTH_PCLIENT_IMAGE"] = path;
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-Command");
+        start.ArgumentList.Add("""
+            $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $env:NETAUTH_PCLIENT_IMAGE
+            if ($signature.Status -eq 'Valid' -and
+                $signature.SignerCertificate.GetNameInfo('SimpleName', $false) -ceq 'NetMan Co., Ltd.') { exit 0 }
+            exit 1
+            """);
+
+        using var verification = Process.Start(start);
+        if (verification is null)
+        {
+            return null;
         }
 
-        var fullPath = System.IO.Path.GetFullPath(path);
-        return new PClientExecutableIdentity(fullPath, ReadSha256(fullPath));
+        if (!verification.WaitForExit(5000))
+        {
+            verification.Kill();
+            return null;
+        }
+
+        return verification.ExitCode == 0
+            ? new PClientExecutableIdentity(path, Convert.ToHexString(SHA256.HashData(image)))
+            : null;
     }
 
     public bool Matches(Process process)
@@ -33,6 +61,23 @@ internal sealed record PClientExecutableIdentity(string Path, string Sha256)
         {
             return false;
         }
+    }
+
+    public Process? Reopen()
+    {
+        // 확인된 실행 파일을 시작하는 동안 경로 교체 방지
+        using var image = File.OpenRead(Path);
+        if (!string.Equals(Convert.ToHexString(SHA256.HashData(image)), Sha256, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return Process.Start(new ProcessStartInfo(Path)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = System.IO.Path.GetDirectoryName(Path)!
+        });
     }
 
     private static string ReadSha256(string path)

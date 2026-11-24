@@ -8,6 +8,10 @@ $valuePattern = [System.Windows.Automation.ValuePattern]::Pattern
 $invokePattern = [System.Windows.Automation.InvokePattern]::Pattern
 
 function Get-Window($Process) {
+    if ($Process.ProcessName -eq 'NetAuth') {
+        Wait-For { $null -ne (Find-AppWindow $Process 'NetAuthAccountSettings') } 'NetAuth account window'
+        return Find-AppWindow $Process 'NetAuthAccountSettings'
+    }
     Wait-For { $Process.Refresh(); $Process.MainWindowHandle -ne [IntPtr]::Zero } 'App window'
     [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
 }
@@ -81,6 +85,7 @@ try {
     Set-Account $initialId $initialPassword
     Click-Button 'SaveAccount'
     Wait-For { Is-Visible $settings 'EditAccount' } 'Saved account overview'
+    Wait-For { (Find-Control $settings 'SavedAccountId').Current.Name -eq $initialId } 'Saved ID before relaunch'
     $encrypted = [IO.File]::ReadAllBytes($accountPath)
     foreach ($encoding in [Text.Encoding]::UTF8, [Text.Encoding]::Unicode) {
         $decoded = $encoding.GetString($encrypted)
@@ -118,11 +123,10 @@ try {
     Wait-For {
         (Find-Control $dummyWindow 'SubmissionCount').Current.Name -match '\d+' -and $Matches[0] -eq '1'
     } 'Exactly one dummy submission'
-    $state = & $netAuth --probe-dummy
-    if ($state -ne 'Authenticated') { throw "Saved test account did not authenticate. State: $state" }
-
     Wait-For { (Find-Control $settings 'DeleteAccount').Current.IsEnabled } 'Settings ready after login'
     Wait-For { (Find-Control $settings 'VerificationState').Current.Name -eq '인증 확인됨' } 'Verified dummy status'
+    $state = Read-AppOutput $netAuth '--probe-dummy'
+    if ($state -ne 'Authenticated') { throw "Saved test account did not authenticate. State: $state" }
     Assert-CleanLabels $settings
     Click-Button 'DeleteAccount'
     Wait-For { Is-Visible $settings 'ConfirmDelete' } 'Confirm removal'

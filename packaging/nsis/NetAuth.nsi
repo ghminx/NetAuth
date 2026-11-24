@@ -8,6 +8,9 @@ BrandingText "NetAuth"
 SetFont "Malgun Gothic" 9
 
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\NetAuth"
+!define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
+!define RUN_COMMAND "$\"$INSTDIR\NetAuth.exe$\" --start-in-tray"
+!define AUTO_LOGIN_COMMAND "${RUN_COMMAND} --auto-login"
 !define MUI_ICON "${APP_ICON}"
 !define MUI_UNICON "${APP_ICON}"
 !define MUI_BGCOLOR FCFDFE
@@ -19,10 +22,12 @@ SetFont "Malgun Gothic" 9
 !define MUI_HEADERIMAGE_BITMAP_STRETCH AspectFitHeight
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "nsDialogs.nsh"
 
 !define MUI_WELCOMEPAGE_TITLE "$(NetAuthWelcomeTitle)"
 !define MUI_WELCOMEPAGE_TEXT "$(NetAuthWelcomeText)"
 !insertmacro MUI_PAGE_WELCOME
+Page custom ShowInstallOptions SaveInstallOptions
 !define MUI_PAGE_HEADER_TEXT "$(NetAuthInstallTitle)"
 !define MUI_PAGE_HEADER_SUBTEXT "$(NetAuthInstallText)"
 !insertmacro MUI_PAGE_INSTFILES
@@ -46,6 +51,16 @@ LangString NetAuthWelcomeTitle ${LANG_ENGLISH} "Set up PClient access"
 LangString NetAuthWelcomeTitle ${LANG_KOREAN} "PClient 로그인 준비"
 LangString NetAuthWelcomeText ${LANG_ENGLISH} "Save your account in NetAuth to fill in the PClient sign-in fields.$\r$\n$\r$\nNetAuth installs for your Windows account. After setup, open it from the Start menu."
 LangString NetAuthWelcomeText ${LANG_KOREAN} "PClient 계정을 등록해 로그인 입력란을 채울 수 있습니다.$\r$\n$\r$\n현재 Windows 사용자에게 설치됩니다.$\r$\n설치 후 시작 메뉴에서 NetAuth를 열 수 있습니다."
+LangString NetAuthOptionsTitle ${LANG_ENGLISH} "Installation options"
+LangString NetAuthOptionsTitle ${LANG_KOREAN} "설치 옵션"
+LangString NetAuthOptionsText ${LANG_ENGLISH} "Choose how to open NetAuth."
+LangString NetAuthOptionsText ${LANG_KOREAN} "NetAuth를 여는 방법을 선택하세요."
+LangString NetAuthRunAtLogon ${LANG_ENGLISH} "Start NetAuth when I sign in to Windows"
+LangString NetAuthRunAtLogon ${LANG_KOREAN} "Windows 로그인 시 NetAuth 실행"
+LangString NetAuthDesktopIcon ${LANG_ENGLISH} "Create a desktop shortcut"
+LangString NetAuthDesktopIcon ${LANG_KOREAN} "바탕 화면에 바로가기 만들기"
+LangString NetAuthOptionsFailed ${LANG_ENGLISH} "NetAuth was installed, but a startup or desktop option could not be saved."
+LangString NetAuthOptionsFailed ${LANG_KOREAN} "NetAuth는 설치되었지만 시작프로그램 또는 바탕 화면 옵션을 저장하지 못했습니다."
 LangString NetAuthInstallTitle ${LANG_ENGLISH} "Installing NetAuth"
 LangString NetAuthInstallTitle ${LANG_KOREAN} "NetAuth 설치 중"
 LangString NetAuthInstallText ${LANG_ENGLISH} "Setting up the app and its Start menu shortcut."
@@ -69,6 +84,79 @@ Var PreviousVersion
 Var AppReplaced
 Var UninstallerReplaced
 Var ShortcutReplaced
+Var RunAtLogon
+Var DesktopIcon
+Var RunAtLogonCheckbox
+Var DesktopIconCheckbox
+Var DesktopShortcutMoved
+
+Function ShowInstallOptions
+    !insertmacro MUI_HEADER_TEXT "$(NetAuthOptionsTitle)" "$(NetAuthOptionsText)"
+    nsDialogs::Create 1018
+    Pop $0
+    ${If} $0 == error
+        Abort
+    ${EndIf}
+    ${NSD_CreateCheckbox} 0 5u 100% 14u "$(NetAuthRunAtLogon)"
+    Pop $RunAtLogonCheckbox
+    ${NSD_SetState} $RunAtLogonCheckbox $RunAtLogon
+    ${NSD_CreateCheckbox} 0 25u 100% 14u "$(NetAuthDesktopIcon)"
+    Pop $DesktopIconCheckbox
+    ${NSD_SetState} $DesktopIconCheckbox $DesktopIcon
+    nsDialogs::Show
+FunctionEnd
+
+Function SaveInstallOptions
+    ${NSD_GetState} $RunAtLogonCheckbox $RunAtLogon
+    ${NSD_GetState} $DesktopIconCheckbox $DesktopIcon
+FunctionEnd
+
+Function ApplyInstallOptions
+    ReadRegStr $0 HKCU "${RUN_KEY}" "NetAuth"
+    ClearErrors
+    ${If} $RunAtLogon == ${BST_CHECKED}
+        ${If} $0 == ""
+            WriteRegStr HKCU "${RUN_KEY}" "NetAuth" "${RUN_COMMAND}"
+        ${ElseIf} $0 != "${RUN_COMMAND}"
+        ${AndIf} $0 != "${AUTO_LOGIN_COMMAND}"
+            SetErrors
+        ${EndIf}
+    ${ElseIf} $0 == "${RUN_COMMAND}"
+    ${OrIf} $0 == "${AUTO_LOGIN_COMMAND}"
+        DeleteRegValue HKCU "${RUN_KEY}" "NetAuth"
+    ${EndIf}
+    IfErrors options_failed
+
+    ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "DesktopShortcut"
+    ClearErrors
+    ${If} $DesktopIcon == ${BST_CHECKED}
+        ${If} ${FileExists} "$DESKTOP\NetAuth.lnk"
+            ${If} $0 != "$INSTDIR"
+                Goto options_failed
+            ${EndIf}
+        ${Else}
+            CreateShortcut "$DESKTOP\NetAuth.lnk" "$INSTDIR\NetAuth.exe" "" "$INSTDIR\NetAuth.exe" 0
+            IfErrors options_failed
+            WriteRegStr HKCU "${UNINSTALL_KEY}" "DesktopShortcut" "$INSTDIR"
+            ${If} ${Errors}
+                Delete "$DESKTOP\NetAuth.lnk"
+                Goto options_failed
+            ${EndIf}
+        ${EndIf}
+    ${ElseIf} $0 == "$INSTDIR"
+        ${If} ${FileExists} "$DESKTOP\NetAuth.lnk"
+            Delete "$DESKTOP\NetAuth.lnk"
+            IfErrors options_failed
+        ${EndIf}
+        DeleteRegValue HKCU "${UNINSTALL_KEY}" "DesktopShortcut"
+        IfErrors options_failed
+    ${EndIf}
+    Return
+options_failed:
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$(NetAuthOptionsFailed)" /SD IDOK
+    SetErrorLevel 1
+    Abort
+FunctionEnd
 
 !macro ReplaceInstalledFile PATH STAGED REPLACED
     ClearErrors
@@ -134,6 +222,20 @@ setup_ready:
 
 Function .onInit
     !insertmacro LockSetup
+    SetShellVarContext current
+    SetRegView 64
+    StrCpy $RunAtLogon ${BST_UNCHECKED}
+    StrCpy $DesktopIcon ${BST_UNCHECKED}
+    ReadRegStr $0 HKCU "${RUN_KEY}" "NetAuth"
+    ${If} $0 == "${RUN_COMMAND}"
+    ${OrIf} $0 == "${AUTO_LOGIN_COMMAND}"
+        StrCpy $RunAtLogon ${BST_CHECKED}
+    ${EndIf}
+    ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "DesktopShortcut"
+    ${If} $0 == "$INSTDIR"
+    ${AndIf} ${FileExists} "$DESKTOP\NetAuth.lnk"
+        StrCpy $DesktopIcon ${BST_CHECKED}
+    ${EndIf}
 FunctionEnd
 
 Function un.onInit
@@ -204,6 +306,7 @@ install_report_failure:
     SetErrorLevel 1
     Abort
 install_done:
+    Call ApplyInstallOptions
 SectionEnd
 
 Section "Uninstall"
@@ -220,10 +323,18 @@ Section "Uninstall"
     ${EndIf}
     !insertmacro IfBackupExists uninstall_report_failure
 
+    ReadRegStr $0 HKCU "${UNINSTALL_KEY}" "DesktopShortcut"
+    ${If} $0 == "$INSTDIR"
+    ${AndIf} ${FileExists} "$DESKTOP\NetAuth.lnk"
+        ClearErrors
+        Rename "$DESKTOP\NetAuth.lnk" "$DESKTOP\NetAuth.removing.lnk"
+        IfErrors uninstall_report_failure
+        StrCpy $DesktopShortcutMoved 1
+    ${EndIf}
     ClearErrors
     ${If} ${FileExists} "$SMPROGRAMS\NetAuth.lnk"
         Rename "$SMPROGRAMS\NetAuth.lnk" "$SMPROGRAMS\NetAuth.removing.lnk"
-        IfErrors uninstall_report_failure
+        IfErrors uninstall_failed
     ${EndIf}
     ${If} ${FileExists} "$INSTDIR\NetAuth.exe"
         ExecWait '"$INSTDIR\NetAuth.exe" --remove-pclient-preview-startup' $0
@@ -235,6 +346,18 @@ Section "Uninstall"
     IfErrors uninstall_failed
     Delete "$SMPROGRAMS\NetAuth.removing.lnk"
     IfErrors uninstall_failed
+    ${If} $DesktopShortcutMoved == 1
+        Delete "$DESKTOP\NetAuth.removing.lnk"
+        IfErrors uninstall_failed
+    ${EndIf}
+    ReadRegStr $0 HKCU "${RUN_KEY}" "NetAuth"
+    ${If} $0 == "${RUN_COMMAND}"
+    ${OrIf} $0 == "${AUTO_LOGIN_COMMAND}"
+        ClearErrors
+        DeleteRegValue HKCU "${RUN_KEY}" "NetAuth"
+        IfErrors uninstall_failed
+    ${EndIf}
+    ClearErrors
     ${If} $PreviousInstall != ""
         DeleteRegKey HKCU "${UNINSTALL_KEY}"
         IfErrors uninstall_failed
@@ -251,6 +374,10 @@ Section "Uninstall"
     Goto uninstall_done
 
 uninstall_failed:
+    ${If} ${FileExists} "$INSTDIR\NetAuth.exe"
+    ${AndIf} $DesktopShortcutMoved == 1
+        Rename "$DESKTOP\NetAuth.removing.lnk" "$DESKTOP\NetAuth.lnk"
+    ${EndIf}
     ${If} ${FileExists} "$INSTDIR\NetAuth.exe"
     ${AndIf} ${FileExists} "$SMPROGRAMS\NetAuth.removing.lnk"
         Rename "$SMPROGRAMS\NetAuth.removing.lnk" "$SMPROGRAMS\NetAuth.lnk"

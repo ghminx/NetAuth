@@ -12,15 +12,11 @@ function Assert-Equal($Actual, $Expected, $Context) {
 }
 
 function Read-State {
-    $state = & $netAuthExe --probe-dummy
-    Assert-Equal $LASTEXITCODE 0 'NetAuth exit code'
-    $state
+    Read-AppOutput $netAuthExe '--probe-dummy'
 }
 
 function Read-LoginResult {
-    $state = & $netAuthExe --login-dummy
-    Assert-Equal $LASTEXITCODE 0 'Dummy login exit code'
-    $state
+    Read-AppOutput $netAuthExe '--login-dummy'
 }
 
 $scenarios = [ordered]@{
