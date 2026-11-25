@@ -16,9 +16,9 @@
 
 **계정 자동 입력** · PClient가 로그아웃 상태일 때 저장한 ID와 비밀번호를 로그인 화면에 채웁니다. 계정 정보는 현재 Windows 사용자 범위에서 암호화해 보관합니다.
 
-**자동 로그인 및 연결 복구** · 계정을 저장하고 **자동 로그인**을 켜면 Windows 로그인 후뿐 아니라 NetAuth가 트레이에서 실행되는 동안에도 PClient 상태를 확인합니다. 로그아웃이 확인되면 약 4초 뒤 상태를 다시 확인하고 로그인합니다. 실제 PC의 재부팅 및 사용 중 연결 복구는 검증 예정입니다.
+**자동 로그인 및 연결 복구** · 계정을 저장하고 **자동 로그인**을 켜면 NetAuth가 Windows 로그인 후와 트레이 상주 중에 PClient 상태를 확인합니다. 로그아웃을 감지하면 약 4초 뒤 상태를 다시 확인하고 로그인합니다. 실제 PClient 설치 PC에서 재부팅 후 자동 로그인과 사용 중 로그아웃 후 재로그인을 확인했습니다.
 
-**Windows x64** · [GitHub Releases](https://github.com/ghminx/NetAuth/releases)에서 검증용 설치본을 받을 수 있습니다.
+**Windows x64** · [GitHub Releases](https://github.com/ghminx/NetAuth/releases/latest)에서 최신 설치본을 받을 수 있습니다. 기존 NetAuth를 종료한 뒤 같은 위치에 덮어 설치하면 저장 계정과 자동 로그인 설정이 유지됩니다.
 
 ## License
 
